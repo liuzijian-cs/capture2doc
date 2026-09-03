@@ -6,8 +6,10 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 
 - [总体方案](architecture.md)：目标、处理流程、组件职责、XML 中间层和 16GB 显存约束。
 - [Android App 产品与架构草案](android_app.md)：对话式宿主 App、工具系统、Capture2Doc 功能边界和下一里程碑。
-- [Android 开发环境](android_env.md)：工具链版本、首次初始化、构建、检查和三星 S24 Ultra 真机调试。
-- [CameraX 拍照探针](camera_probe.md)：权限、拍照、EXIF 方向校正、1024 像素压缩和真机验收标准。
+- [Android 开发环境](android_env.md)：工具链版本、首次初始化、构建、检查和通用真机调试。
+- [Android 相机架构与状态管理](android_camera_architecture.md)：模块边界、状态机、并发、文件和生命周期。
+- [Android 相机拍摄与图像处理](android_camera_capture.md)：CameraX 配置、4:3 取景、对焦、方向、低延迟和 1280 像素选型。
+- [Android 相机测试与验收](android_camera_testing.md)：自动化覆盖、通用真机清单、性能指标和 OCR 输入对照。
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 - [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。

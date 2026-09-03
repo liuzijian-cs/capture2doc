@@ -203,6 +203,15 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Android / Gradle
+.gradle/
+.kotlin/
+.idea/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
 # Ruff stuff:
 .ruff_cache/
 

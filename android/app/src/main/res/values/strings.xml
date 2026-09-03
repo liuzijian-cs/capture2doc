@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Capture2Doc</string>
+    <string name="home_title">把手机拍摄变成结构化文档</string>
+    <string name="home_subtitle">图片仅发送到你配置的本地服务，核心识别不会调用第三方模型 API。</string>
+    <string name="app_ready">App 已就绪</string>
+    <string name="server_not_configured">尚未配置本地服务</string>
+    <string name="start_scan">开始拍照扫描</string>
+    <string name="current_milestone">当前里程碑：CameraX 拍照探针</string>
+
+    <string name="camera_probe_title">相机能力测试</string>
+    <string name="camera_probe_back">返回</string>
+    <string name="camera_permission_title">允许使用摄像头</string>
+    <string name="camera_permission_description">Capture2Doc 需要摄像头来拍摄文档。照片仅保存在 App 私有目录，本次测试不会上传。</string>
+    <string name="camera_permission_action">允许使用摄像头</string>
+    <string name="camera_permission_requesting">正在等待系统授权…</string>
+    <string name="camera_permission_denied_title">尚未获得摄像头权限</string>
+    <string name="camera_permission_denied_description">你可以重新请求权限；如果系统不再显示授权弹窗，请前往应用设置开启摄像头权限。</string>
+    <string name="camera_permission_retry">重新授权</string>
+    <string name="camera_open_settings">打开应用设置</string>
+    <string name="camera_starting">正在启动摄像头…</string>
+    <string name="camera_unavailable_title">设备没有可用摄像头</string>
+    <string name="camera_unavailable_description">宿主 App 仍可使用，但当前设备无法执行拍照测试。</string>
+    <string name="camera_shutter">拍照</string>
+    <string name="camera_finish">完成</string>
+    <string name="camera_continue">继续拍摄</string>
+    <string name="camera_capture_status">已拍 %1$d 张 · 保存中 %2$d · 处理中 %3$d</string>
+    <string name="camera_capture_resolution">实际拍摄分辨率：%1$d × %2$d</string>
+    <string name="camera_postview_supported">临时预览：设备支持，已启用</string>
+    <string name="camera_postview_unsupported">临时预览：设备不支持，将使用状态占位</string>
+    <string name="camera_queue_full">正在保存 3 张照片，请稍候…</string>
+    <string name="camera_finishing">正在完成剩余 %1$d 张…</string>
+    <string name="camera_results_title">本次拍摄：%1$d 张</string>
+    <string name="camera_thumbnail_description">本次拍摄的照片缩略图</string>
+    <string name="camera_result_image_description">压缩后的文档照片</string>
+    <string name="camera_original_metrics">原图：%1$d × %2$d，%3$s</string>
+    <string name="camera_normalized_metrics">OCR 图：%1$d × %2$d，%3$s</string>
+    <string name="camera_rotation_metrics">原图 EXIF 旋转：%1$d°</string>
+    <string name="camera_capture_started_metrics">点击至开始曝光：%1$s</string>
+    <string name="camera_postview_metrics">点击至临时预览：%1$s</string>
+    <string name="camera_saved_metrics">点击至原图保存：%1$d ms</string>
+    <string name="camera_duration_metrics">图像归一化耗时：%1$d ms</string>
+    <string name="camera_capture_id">捕获 ID：%1$s</string>
+    <string name="camera_back_home">返回首页</string>
+    <string name="camera_error_title">拍照处理失败</string>
+    <string name="camera_error_unknown">发生未知错误，请重试。</string>
+    <string name="camera_retry">重试</string>
+    <string name="camera_remove">移除</string>
+</resources>
