@@ -53,10 +53,13 @@ def recognize_image(
     settings: PaddleOcrVlSettings,
     *,
     client: Any | None = None,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
 ) -> OcrResult:
     """Send one image in user-provided order to the local VLM worker."""
 
+    output_limit = settings.max_output_tokens if max_tokens is None else max_tokens
+    if output_limit <= 0:
+        raise ValueError("max_tokens must be positive")
     openai_client = client or _create_openai_client(settings)
     response = openai_client.chat.completions.create(
         model=settings.served_model_name,
@@ -73,7 +76,7 @@ def recognize_image(
             }
         ],
         temperature=0,
-        max_tokens=max_tokens,
+        max_tokens=output_limit,
     )
     content = response.choices[0].message.content
     if not isinstance(content, str) or not content.strip():

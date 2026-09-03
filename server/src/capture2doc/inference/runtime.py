@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from capture2doc.config import PaddleOcrVlSettings
+from capture2doc.inference.device import is_wsl2
 
 
 class RuntimeStartError(RuntimeError):
@@ -38,7 +39,7 @@ class VllmRuntime:
         self._log_file: BinaryIO | None = None
 
     def build_command(self) -> list[str]:
-        return [
+        command = [
             self.executable,
             "serve",
             str(self.model_path),
@@ -50,8 +51,6 @@ class VllmRuntime:
             str(self.settings.port),
             "--dtype",
             self.settings.dtype,
-            "--gpu-memory-utilization",
-            str(self.settings.gpu_memory_utilization),
             "--max-model-len",
             str(self.settings.max_model_len),
             "--max-num-batched-tokens",
@@ -61,8 +60,38 @@ class VllmRuntime:
             "--no-enable-prefix-caching",
             "--mm-processor-cache-gb",
             "0",
+            "--mm-processor-kwargs",
+            json.dumps(
+                {"max_pixels": self.settings.max_pixels},
+                separators=(",", ":"),
+            ),
+            "--limit-mm-per-prompt",
+            json.dumps({"image": 1}, separators=(",", ":")),
             "--trust-remote-code",
         ]
+        if self.settings.kv_cache_memory_bytes is not None:
+            command.extend(
+                ["--kv-cache-memory-bytes", str(self.settings.kv_cache_memory_bytes)]
+            )
+        else:
+            assert self.settings.gpu_memory_utilization is not None
+            command.extend(
+                ["--gpu-memory-utilization", str(self.settings.gpu_memory_utilization)]
+            )
+        return command
+
+    def build_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+            }
+        )
+        environment.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+        if is_wsl2():
+            environment.setdefault("VLLM_WSL2_ENABLE_PIN_MEMORY", "1")
+        return environment
 
     @property
     def process(self) -> subprocess.Popen[bytes] | None:
@@ -80,20 +109,13 @@ class VllmRuntime:
 
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_file = self.log_path.open("ab", buffering=0)
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "HF_HUB_OFFLINE": "1",
-                "TRANSFORMERS_OFFLINE": "1",
-            }
-        )
         try:
             self._process = subprocess.Popen(
                 self.build_command(),
                 stdin=subprocess.DEVNULL,
                 stdout=self._log_file,
                 stderr=subprocess.STDOUT,
-                env=environment,
+                env=self.build_environment(),
                 shell=False,
                 start_new_session=(os.name == "posix"),
             )

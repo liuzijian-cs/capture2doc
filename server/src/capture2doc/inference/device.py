@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 
@@ -95,3 +96,15 @@ def detect_cuda(torch_module: Any | None = None, *, device_index: int = 0) -> Cu
 
 def require_cuda() -> CudaDeviceInfo:
     return detect_cuda()
+
+
+def is_wsl2(osrelease: str | None = None) -> bool:
+    """Return whether the current Linux kernel identifies itself as WSL2."""
+
+    if osrelease is None:
+        try:
+            osrelease = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8")
+        except OSError:
+            return False
+    normalized = osrelease.lower()
+    return "microsoft" in normalized and "wsl2" in normalized

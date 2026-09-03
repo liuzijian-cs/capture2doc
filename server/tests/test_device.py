@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from capture2doc.inference.device import CudaUnavailableError, detect_cuda
+from capture2doc.inference.device import CudaUnavailableError, detect_cuda, is_wsl2
 
 
 class FakeCuda:
@@ -49,3 +49,16 @@ def test_detect_cuda_returns_device_details() -> None:
 def test_detect_cuda_fails_clearly_when_unavailable() -> None:
     with pytest.raises(CudaUnavailableError, match="CUDA is unavailable"):
         detect_cuda(fake_torch(available=False))
+
+
+@pytest.mark.parametrize(
+    ("osrelease", "expected"),
+    [
+        ("6.6.87.2-microsoft-standard-WSL2", True),
+        ("5.15.167.4-microsoft-standard-WSL2", True),
+        ("6.12.0-generic", False),
+        ("Darwin Kernel Version 25.0.0", False),
+    ],
+)
+def test_is_wsl2_uses_kernel_release(osrelease: str, expected: bool) -> None:
+    assert is_wsl2(osrelease) is expected

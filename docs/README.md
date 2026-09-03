@@ -10,6 +10,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 - [CameraX 拍照探针](camera_probe.md)：权限、拍照、EXIF 方向校正、1024 像素压缩和真机验收标准。
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
+- [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。
 
 ## 当前决策
 

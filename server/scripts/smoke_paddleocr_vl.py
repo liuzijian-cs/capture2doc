@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Sequence
 
 from capture2doc.config import MODEL_REVISION, PaddleOcrVlSettings
 from capture2doc.inference.device import detect_cuda
@@ -16,13 +18,50 @@ from capture2doc.inference.paddleocr_vl import recognize_image
 from capture2doc.inference.runtime import VllmRuntime
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True, help="Absolute path to a PNG/JPEG document")
     parser.add_argument("--cache-dir", help="ModelScope cache directory")
     parser.add_argument("--revision", default=MODEL_REVISION, help="Model revision")
     parser.add_argument("--output-dir", help="Directory for response, timings, and logs")
-    return parser.parse_args()
+    parser.add_argument("--host", help="Worker bind and client connect host")
+    parser.add_argument("--max-pixels", type=int, help="Maximum pixels passed to the processor")
+    parser.add_argument("--max-model-len", type=int, help="Maximum prompt and output length")
+    parser.add_argument(
+        "--max-num-batched-tokens",
+        type=int,
+        help="Maximum tokens handled in one scheduler iteration",
+    )
+    parser.add_argument("--max-tokens", type=int, help="Maximum generated OCR tokens")
+    memory_group = parser.add_mutually_exclusive_group()
+    memory_group.add_argument(
+        "--kv-cache-memory-bytes",
+        type=int,
+        help="Fixed KV cache allocation in bytes",
+    )
+    memory_group.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        help="Use proportional GPU allocation instead of fixed KV cache bytes",
+    )
+    return parser.parse_args(argv)
+
+
+def settings_from_args(args: argparse.Namespace) -> PaddleOcrVlSettings:
+    settings = PaddleOcrVlSettings.from_sources(args.cache_dir, revision=args.revision)
+    overrides = {
+        "host": args.host,
+        "max_pixels": args.max_pixels,
+        "max_model_len": args.max_model_len,
+        "max_num_batched_tokens": args.max_num_batched_tokens,
+        "max_output_tokens": args.max_tokens,
+        "kv_cache_memory_bytes": args.kv_cache_memory_bytes,
+    }
+    selected = {name: value for name, value in overrides.items() if value is not None}
+    if args.gpu_memory_utilization is not None:
+        selected["kv_cache_memory_bytes"] = None
+        selected["gpu_memory_utilization"] = args.gpu_memory_utilization
+    return replace(settings, **selected)
 
 
 def default_output_dir() -> Path:
@@ -43,7 +82,7 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    settings = PaddleOcrVlSettings.from_sources(args.cache_dir, revision=args.revision)
+    settings = settings_from_args(args)
     print(f"ModelScope cache: {settings.cache_dir}")
     print(f"Model: {settings.model_id}@{settings.revision}")
 
@@ -78,9 +117,21 @@ def main() -> int:
         "model_path": str(model_path),
         "image_path": str(image_path),
         "endpoint": settings.api_base_url,
+        "inference_settings": {
+            "dtype": settings.dtype,
+            "max_pixels": settings.max_pixels,
+            "max_output_tokens": settings.max_output_tokens,
+            "max_model_len": settings.max_model_len,
+            "max_num_batched_tokens": settings.max_num_batched_tokens,
+            "max_num_seqs": settings.max_num_seqs,
+            "kv_cache_memory_bytes": settings.kv_cache_memory_bytes,
+            "gpu_memory_utilization": settings.gpu_memory_utilization,
+        },
         "load_seconds": round(load_seconds, 3),
         "inference_seconds": round(inference_seconds, 3),
         "response_characters": len(result.content),
+        "usage": result.raw_response.get("usage"),
+        "finish_reason": result.raw_response.get("choices", [{}])[0].get("finish_reason"),
         "device_before": device_before.to_dict(),
         "device_after": device_after.to_dict(),
         "models_response": models_response,
