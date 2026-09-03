@@ -1,6 +1,6 @@
 # Android 开发环境
 
-> 状态：开发、构建与首台真机安装已验证；CameraX 真机拍摄待验证
+> 状态：开发、构建、首台真机安装与 CameraX 完整验收均已通过
 > 最近核对：2026-09-03，macOS / Apple Silicon
 
 本文档集中记录 Capture2Doc Android 工程的工具链版本、本机环境、首次初始化、构建和真机调试步骤。具体依赖版本仍以 [`android/gradle/libs.versions.toml`](../android/gradle/libs.versions.toml) 和 [`android/app/build.gradle.kts`](../android/app/build.gradle.kts) 为准。
@@ -55,14 +55,14 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 | `:app:lintDebug` | 通过，已生成 HTML 报告 |
 | `:app:assembleDebugAndroidTest` | 通过，已生成真机测试 APK |
 | Android 真机 | ADB 授权完成，低延迟 Debug APK 已安装并冷启动成功 |
-| CameraX 真机验证 | 后置摄像头绑定成功；人工拍摄验收待完成 |
+| CameraX 真机验证 | 功能、连续拍摄、方向、对焦、文件输出与性能验收均通过 |
 | `:app:connectedDebugAndroidTest` | 8 个测试全部通过 |
 
 当前不影响真机开发的缺项：
 
 - 没有安装 Android command-line tools、system image 或 AVD；
 - 暂未建立模拟器测试矩阵；
-- CameraX 低延迟连续拍照探针已通过构建和自动化连接测试；仍需手持完成对焦、横竖屏和 20 张性能验收。
+- CameraX 低延迟连续拍照探针已通过构建、自动化连接测试和完整真机验收。
 
 项目当前优先使用 Android 真机验证，因此不要求先下载模拟器 system image。
 
@@ -179,7 +179,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 首轮真机检查至少覆盖：冷启动、浅色/深色模式、横竖屏切换、返回手势和字体缩放。CameraX 探针还需覆盖权限拒绝与重新授权、横竖屏拍照、切入后台、连续拍摄和结果尺寸核对，详细清单见 [Android 相机测试与验收](android_camera_testing.md)。
 
-当前 4:3 低延迟 CameraX Debug APK 已在连接的 Android 真机上完成冷启动、权限说明、后置摄像头绑定和 8 个自动化连接测试。实际拍摄分辨率和 postview 支持情况由运行时能力决定。尚需手持完成真实快门、近远点对焦、横竖屏、1280 像素 OCR 派生图核对和 20 张耗时清单，才能声明完整的相机性能验收通过。
+当前 4:3 低延迟 CameraX Debug APK 已在连接的 Android 真机上完成冷启动、权限说明、后置摄像头绑定、8 个自动化连接测试，以及真实快门、近远点对焦、横竖屏与反向方向、1280 像素 OCR 派生图核对和 20 张性能验收。实际拍摄分辨率和 postview 支持情况仍由运行时能力决定。
 
 ### 相机权限复测
 

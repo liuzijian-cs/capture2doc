@@ -5,7 +5,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 ## 文档索引
 
 - [总体方案](architecture.md)：目标、处理流程、组件职责、XML 中间层和 16GB 显存约束。
-- [Android App 产品与架构草案](android_app.md)：对话式宿主 App、工具系统、Capture2Doc 功能边界和下一里程碑。
+- [Android App 产品与架构草案](android_app.md)：对话式宿主 App、工具系统、Capture2Doc 功能边界、Android 视觉主题和下一里程碑。
 - [Android 开发环境](android_env.md)：工具链版本、首次初始化、构建、检查和通用真机调试。
 - [Android 相机架构与状态管理](android_camera_architecture.md)：模块边界、状态机、并发、文件和生命周期。
 - [Android 相机拍摄与图像处理](android_camera_capture.md)：CameraX 配置、4:3 取景、对焦、方向、低延迟和 1280 像素选型。
