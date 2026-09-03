@@ -26,6 +26,40 @@ Capture2Doc 单图页面解析 Worker 中应如何设置 `max_model_len` 和其�
 - 当前 Worker 固定使用 **256 MiB KV cache**。单个 8192-token 序列的理论需求约为
   144 MiB，因此仍留有实现开销余量，同时避免按显存比例预留数 GiB 空间。
 
+### Android 输入边界
+
+Android 相机保留约 `1920×1440` 的 4:3 原始 JPEG，并额外生成最长边 1280 像素的 OCR 派生图：横图通常为 `1280×960`，竖图通常为 `960×1280`。这里的 1280 是客户端像素长边，不等于 1280 image tokens。
+
+`1280×960` 的面积高于默认 `max_pixels=1003520`，服务端 processor 仍会保持比例并按 28 像素网格进行最终缩放，结果预计接近 `1148×840`，但必须以实际 `image_grid_thw` 为准。Android 不执行 Paddle 专属网格对齐，以免客户端文件契约与模型版本耦合。
+
+## 支持的识别任务
+
+PaddleOCR-VL-1.6 不只支持纯文字 OCR。直接调用 VLM 时，通过文本 prompt 指定当前
+图片或裁切区域的识别任务：
+
+| 任务 | Prompt | 主要能力 | 预期结果 |
+|---|---|---|---|
+| 普通文字识别 | `OCR:` | 识别正文、标题等可见文字 | 以纯文字和基本换行为主 |
+| 表格识别 | `Table Recognition:` | 恢复行列、表头、单元格及合并关系 | 可还原表格的结构化标记 |
+| 公式识别 | `Formula Recognition:` | 识别数学公式及符号关系 | 以 LaTeX 表达为主 |
+| 图表解析 | `Chart Recognition:` | 理解坐标轴、图例、数据系列和值之间的关系 | 图表数据或结构化描述 |
+| 文字定位 | `Spotting:` | 同时检测文字、识别内容并给出位置 | 文字及其定位结果 |
+| 印章识别 | `Seal Recognition:` | 识别圆形、弧形等印章文字 | 印章文字内容 |
+
+`Table Recognition:` 与 `Chart Recognition:` 不可互换。前者恢复显式单元格之间的
+行列关系；后者需要根据柱高、折线位置、颜色、坐标轴和图例推断视觉编码的数据关系。
+
+这些 prompt 面向已经确定类型的单个元素或裁切区域。完整页面解析还需要布局检测先
+判断区域类型和阅读顺序，再把不同区域路由到对应任务并合并结果。官方完整
+PaddleOCR-VL pipeline 使用 PP-DocLayoutV3 完成这部分工作；仅用 Transformers/vLLM
+直接调用模型不等于完整的 page-level document parsing。参见
+[ModelScope 官方模型卡](https://modelscope.cn/models/PaddlePaddle/PaddleOCR-VL-1.6)和
+[PaddleOCR-VL pipeline 文档](https://www.paddleocr.ai/main/en/version3.x/pipeline_usage/PaddleOCR-VL.html)。
+
+Capture2Doc 当前的 `recognize_image()` 只发送 `OCR:`，所以现阶段只接入了普通文字
+识别。表格、公式、图表、Spotting 和印章是模型已支持但项目尚未路由的能力，不能在
+README 或 API 中描述为已经实现。
+
 ## 当前快照中的关键配置
 
 | 配置 | 当前值 | 含义 |
