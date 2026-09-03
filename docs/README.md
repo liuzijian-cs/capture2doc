@@ -5,13 +5,18 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 ## 文档索引
 
 - [总体方案](architecture.md)：目标、处理流程、组件职责、XML 中间层和 16GB 显存约束。
+- [Android App 产品与架构草案](android_app.md)：对话式宿主 App、工具系统、Capture2Doc 功能边界和下一里程碑。
+- [Android 开发环境](android_env.md)：工具链版本、首次初始化、构建、检查和三星 S24 Ultra 真机调试。
+- [CameraX 拍照探针](camera_probe.md)：权限、拍照、EXIF 方向校正、1024 像素压缩和真机验收标准。
+- [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 
 ## 当前决策
 
 - 系统边界：Android App 负责拍照/视频采集和页面预处理，本地服务端接收页面图片流并完成解析、组装和导出。
-- NVIDIA & Apple Silicon 16GB：PaddleOCR-VL-1.6 页面解析 + Qwen3.5-9B 多页编排。
-- 中间表示：版本化的 C2D-XML，保留页面、块类型、阅读顺序、坐标和来源证据；最终 XSD 尚待设计。
+- 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B 4-bit，Apple Silicon 默认 4B 4-bit。
+- 中间表示：C2D-XML v0.1 标签基线已经冻结，只保留最终文档的逻辑结构、内容、顺序和有限行内样式；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。下一步编写对应 XSD。
+- 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 
 ## 状态约定
 
