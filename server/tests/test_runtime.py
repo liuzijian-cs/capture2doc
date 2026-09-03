@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import io
+import signal
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from capture2doc.config import PaddleOcrVlSettings
+from capture2doc.inference import runtime as runtime_module
+from capture2doc.inference.runtime import RuntimeStartError, VllmRuntime
+
+
+def make_runtime(tmp_path: Path) -> VllmRuntime:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    settings = PaddleOcrVlSettings(cache_dir=tmp_path / "cache")
+    return VllmRuntime(settings, model_path, tmp_path / "worker.log")
+
+
+def test_build_command_contains_fixed_first_pass_settings(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    command = runtime.build_command()
+
+    assert command[:2] == ["vllm", "serve"]
+    assert ["--dtype", "bfloat16"] == command[command.index("--dtype") : command.index("--dtype") + 2]
+    assert "--trust-remote-code" in command
+    assert "--no-enable-prefix-caching" in command
+    assert command[command.index("--mm-processor-cache-gb") + 1] == "0"
+    assert command[command.index("--max-num-seqs") + 1] == "1"
+
+
+class HealthyResponse(io.BytesIO):
+    status = 200
+
+    def __enter__(self) -> "HealthyResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
+def test_wait_ready_accepts_healthy_response(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime._process = SimpleNamespace(poll=lambda: None)  # type: ignore[assignment]
+
+    runtime.wait_ready(timeout_seconds=0.1, urlopen_fn=lambda *_args, **_kwargs: HealthyResponse())
+
+
+def test_wait_ready_reports_early_exit_and_log_tail(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime.log_path.write_text("important failure\n", encoding="utf-8")
+    runtime._process = SimpleNamespace(poll=lambda: 3)  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeStartError, match="important failure"):
+        runtime.wait_ready(timeout_seconds=0.1)
+
+
+def test_wait_ready_reports_health_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    runtime._process = SimpleNamespace(poll=lambda: None)  # type: ignore[assignment]
+    times = iter((0.0, 1.0))
+    monkeypatch.setattr(runtime_module.time, "monotonic", lambda: next(times))
+
+    with pytest.raises(RuntimeStartError, match="within 0.5s"):
+        runtime.wait_ready(timeout_seconds=0.5)
+
+
+def test_stop_escalates_after_terminate_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = make_runtime(tmp_path)
+    wait_calls = 0
+
+    class FakeProcess:
+        pid = 12345
+
+        def poll(self) -> None:
+            return None
+
+        def wait(self, *, timeout: float) -> int:
+            nonlocal wait_calls
+            wait_calls += 1
+            if wait_calls == 1:
+                raise subprocess.TimeoutExpired("vllm", timeout)
+            return 0
+
+    runtime._process = FakeProcess()  # type: ignore[assignment]
+    signals: list[signal.Signals] = []
+    monkeypatch.setattr(runtime, "_send_signal", signals.append)
+
+    runtime.stop(timeout_seconds=0.01)
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert runtime.process is None

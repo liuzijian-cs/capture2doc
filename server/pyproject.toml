@@ -1,7 +1,26 @@
 [project]
 name = "capture2doc"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local inference server for Capture2Doc"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
+
+[project.optional-dependencies]
+cuda = [
+    "modelscope>=1.39.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "openai>=3.7.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "vllm==0.28.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/capture2doc"]

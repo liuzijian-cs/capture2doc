@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Start a local PaddleOCR-VL worker and run one image through it."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+
+from capture2doc.config import MODEL_REVISION, PaddleOcrVlSettings
+from capture2doc.inference.device import detect_cuda
+from capture2doc.inference.model_store import resolve_prepared_model
+from capture2doc.inference.paddleocr_vl import recognize_image
+from capture2doc.inference.runtime import VllmRuntime
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--image", required=True, help="Absolute path to a PNG/JPEG document")
+    parser.add_argument("--cache-dir", help="ModelScope cache directory")
+    parser.add_argument("--revision", default=MODEL_REVISION, help="Model revision")
+    parser.add_argument("--output-dir", help="Directory for response, timings, and logs")
+    return parser.parse_args()
+
+
+def default_output_dir() -> Path:
+    server_root = Path(__file__).resolve().parents[1]
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return server_root / ".cache" / "paddleocr-vl-smoke" / run_id
+
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    args = parse_args()
+    image_path = Path(args.image).expanduser().resolve()
+    output_dir = (
+        Path(args.output_dir).expanduser().resolve() if args.output_dir else default_output_dir()
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    settings = PaddleOcrVlSettings.from_sources(args.cache_dir, revision=args.revision)
+    print(f"ModelScope cache: {settings.cache_dir}")
+    print(f"Model: {settings.model_id}@{settings.revision}")
+
+    device_before = detect_cuda()
+    print(
+        f"CUDA device: {device_before.name}, compute capability "
+        f"{device_before.compute_capability[0]}.{device_before.compute_capability[1]}, "
+        f"{device_before.total_memory_gib:.2f} GiB"
+    )
+    model_path = resolve_prepared_model(settings)
+    print(f"Local snapshot: {model_path}")
+
+    runtime = VllmRuntime(settings, model_path, output_dir / "vllm.log")
+    started_at = time.perf_counter()
+    runtime.start()
+    try:
+        runtime.wait_ready()
+        load_seconds = time.perf_counter() - started_at
+        models_response = runtime.fetch_models()
+
+        inference_started_at = time.perf_counter()
+        result = recognize_image(image_path, settings)
+        inference_seconds = time.perf_counter() - inference_started_at
+        write_json(output_dir / "response.json", result.raw_response)
+    finally:
+        runtime.stop()
+
+    device_after = detect_cuda()
+    summary = {
+        "model_id": settings.model_id,
+        "revision": settings.revision,
+        "model_path": str(model_path),
+        "image_path": str(image_path),
+        "endpoint": settings.api_base_url,
+        "load_seconds": round(load_seconds, 3),
+        "inference_seconds": round(inference_seconds, 3),
+        "response_characters": len(result.content),
+        "device_before": device_before.to_dict(),
+        "device_after": device_after.to_dict(),
+        "models_response": models_response,
+    }
+    write_json(output_dir / "summary.json", summary)
+    print(f"OCR response: {len(result.content)} characters")
+    print(f"Load time: {load_seconds:.3f}s")
+    print(f"Inference time: {inference_seconds:.3f}s")
+    print(f"Artifacts: {output_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
