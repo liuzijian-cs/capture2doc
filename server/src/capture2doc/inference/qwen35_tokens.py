@@ -71,7 +71,10 @@ def sha256_if_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def _load_processor(model_path: Path) -> Any:
+def load_qwen35_processor(model_path: str | Path) -> Any:
+    """Load the prepared processor without loading model weights."""
+
+    resolved_model_path = Path(model_path).expanduser().resolve()
     try:
         from transformers import AutoProcessor
     except ImportError as exc:
@@ -80,7 +83,7 @@ def _load_processor(model_path: Path) -> Any:
             "`uv sync --extra cuda`."
         ) from exc
     return AutoProcessor.from_pretrained(
-        str(model_path),
+        str(resolved_model_path),
         local_files_only=True,
     )
 
@@ -117,7 +120,7 @@ def inspect_qwen35_tokens(
     if not resolved_model_path.is_dir():
         raise FileNotFoundError(f"Model snapshot does not exist: {resolved_model_path}")
 
-    local_processor = processor or _load_processor(resolved_model_path)
+    local_processor = processor or load_qwen35_processor(resolved_model_path)
     local_image = image if image is not None else _load_rgb_image(resolved_image_path)
     original_width, original_height = (int(value) for value in local_image.size)
 

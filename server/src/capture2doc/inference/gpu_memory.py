@@ -113,6 +113,30 @@ class GpuMemorySampler:
             "snapshots": {name: reading.to_dict() for name, reading in snapshots.items()},
         }
 
+    def begin_window(self) -> int:
+        """Return a sample index for measuring one request within a longer run."""
+
+        with self._lock:
+            return len(self._samples)
+
+    def window_summary(self, start_index: int) -> dict[str, int]:
+        """Summarize samples captured since ``begin_window`` was called."""
+
+        if start_index < 0:
+            raise ValueError("start_index must be non-negative")
+        with self._lock:
+            samples = list(self._samples[start_index:])
+        if not samples:
+            raise RuntimeError("GPU memory window has no readings")
+        peak = max(samples, key=lambda value: value.used_mib)
+        return {
+            "first_memory_mib": samples[0].used_mib,
+            "last_memory_mib": samples[-1].used_mib,
+            "peak_memory_mib": peak.used_mib,
+            "available_at_peak_mib": peak.total_mib - peak.used_mib,
+            "sample_count": len(samples),
+        }
+
     def _sample_loop(self) -> None:
         while not self._stop_event.is_set():
             try:

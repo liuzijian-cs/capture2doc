@@ -14,6 +14,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 - [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。
 - [Qwen3.5-9B FP8 输入 Token 与独立 Worker](model_qwen_3_5_9b.md)：图像 token、chat template、16K/8K 预算、量化和显存验证方法。
+- [Qwen3.5-9B FP8 参数实测与推荐](model_qwen_3_5_9b_parameters.md)：16GB NVIDIA 实测结果、显存对比和当前推荐参数。
 
 ## 当前决策
 

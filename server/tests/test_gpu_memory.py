@@ -42,3 +42,27 @@ def test_sampler_background_thread_stops_cleanly() -> None:
     sampler.stop()
 
     assert sampler.summary()["sample_count"] > 0
+
+
+def test_sampler_summarizes_one_request_window() -> None:
+    readings = iter(
+        [
+            GpuMemoryReading(10_000, 6_000, 16_000),
+            GpuMemoryReading(15_900, 100, 16_000),
+            GpuMemoryReading(14_500, 1_500, 16_000),
+        ]
+    )
+    sampler = GpuMemorySampler(reader=lambda: next(readings))
+
+    sampler.snapshot("before")
+    start_index = sampler.begin_window()
+    sampler.snapshot("peak")
+    sampler.snapshot("after")
+
+    assert sampler.window_summary(start_index) == {
+        "first_memory_mib": 15_900,
+        "last_memory_mib": 14_500,
+        "peak_memory_mib": 15_900,
+        "available_at_peak_mib": 100,
+        "sample_count": 2,
+    }

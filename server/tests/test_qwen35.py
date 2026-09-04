@@ -78,9 +78,51 @@ def test_analyze_image_can_enable_thinking_and_override_output(tmp_path: Path) -
     assert request["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
 
 
+def test_analyze_image_can_force_stress_output_length(tmp_path: Path) -> None:
+    image_path = tmp_path / "document.png"
+    image_path.write_bytes(b"not-decoded-by-the-client")
+    settings = Qwen35Settings(cache_dir=tmp_path / "cache")
+    client, completions = make_client()
+
+    analyze_image(
+        image_path,
+        "Stress it.",
+        settings,
+        prompt_tokens=500,
+        max_tokens=2_048,
+        ignore_eos=True,
+        request_timeout_seconds=1_200,
+        client=client,
+    )
+
+    request = completions.requests[0]
+    assert request["max_tokens"] == 2_048
+    assert request["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False},
+        "ignore_eos": True,
+    }
+
+
 def test_prompt_budget_reserves_full_default_output(tmp_path: Path) -> None:
     settings = Qwen35Settings(cache_dir=tmp_path)
 
     assert validate_prompt_budget(8_192, settings) == 8_192
     with pytest.raises(ValueError, match="at most 8192"):
         validate_prompt_budget(8_193, settings)
+
+
+def test_request_timeout_must_be_positive(tmp_path: Path) -> None:
+    image_path = tmp_path / "document.png"
+    image_path.write_bytes(b"not-decoded-by-the-client")
+    settings = Qwen35Settings(cache_dir=tmp_path / "cache")
+    client, _completions = make_client()
+
+    with pytest.raises(ValueError, match="request_timeout_seconds"):
+        analyze_image(
+            image_path,
+            "Stress it.",
+            settings,
+            prompt_tokens=500,
+            request_timeout_seconds=0,
+            client=client,
+        )

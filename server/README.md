@@ -70,6 +70,30 @@ Qwen 默认使用 `max_pixels=1310720`（最多约 1280 image tokens）、
 smoke 输出位于 `.cache/qwen35-smoke/`，包含原始响应、token 摘要、渲染模板、
 vLLM 日志，以及启动前、模型加载后、推理峰值和退出后的 GPU 全局显存。
 
+### 长上下文与长输出压力测试
+
+使用已经准备好的模型和当前测试图片运行完整压力矩阵：
+
+```bash
+uv run --extra cuda python scripts/stress_qwen35.py \
+  --image /absolute/path/document.jpg \
+  --host 10.255.255.254
+
+```
+
+脚本生成 tokenizer 精确计数的 4K/8K 合成文本，并依次验证：
+
+- 16K context 下，单图加 4K 文本实际生成 2K、4K 和 8K tokens；
+- 16K context 下，单图加 8K 文本预检失败，不加载模型；
+- 17728 context 下，单图加 8K 文本进行非生产边界实验。
+
+长输出请求通过 `ignore_eos=true` 强制生成到上限，只用于容量和稳定性测试，不用于
+评价输出质量。完整矩阵可能运行较长时间，也可能在边界用例触发 OOM。结果会在每个
+阶段结束后立即写入 `.cache/qwen35-stress/`；边界失败不会覆盖已经完成的阶段。
+可以用 `--case 4k-default`、`--case 8k-rejection` 或 `--case 8k-boundary` 单独重跑。
+完整矩阵中若 `4k-default` 未通过，脚本会跳过更激进的 `8k-boundary`；显式选择边界
+用例时则允许独立执行。
+
 ## WSL 兼容和资源覆盖
 
 WSL2 会自动为 Worker 子进程启用 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`，不会覆盖用户已经
@@ -93,4 +117,5 @@ Paddle smoke 同样支持 `--host 10.255.255.254`。
 允许联网，inspect 和 smoke 只读取已经缓存的本地快照，不会隐式下载。
 
 详细说明见 [PaddleOCR-VL-1.6 输入 Token 与调优](../docs/model_paddle_ocr_v_1_6.md)
-和 [Qwen3.5-9B FP8 输入 Token 与独立 Worker](../docs/model_qwen_3_5_9b.md)。
+、[Qwen3.5-9B FP8 输入 Token 与独立 Worker](../docs/model_qwen_3_5_9b.md)和
+[Qwen3.5-9B FP8 参数实测与推荐](../docs/model_qwen_3_5_9b_parameters.md)。

@@ -22,7 +22,11 @@ class Qwen35Result:
     raw_response: dict[str, Any]
 
 
-def _create_openai_client(settings: Qwen35Settings) -> Any:
+def _create_openai_client(
+    settings: Qwen35Settings,
+    *,
+    timeout_seconds: float = 600.0,
+) -> Any:
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -30,7 +34,11 @@ def _create_openai_client(settings: Qwen35Settings) -> Any:
             "The OpenAI client is not installed. On NVIDIA/WSL run "
             "`uv sync --extra cuda`."
         ) from exc
-    return OpenAI(api_key="EMPTY", base_url=settings.api_base_url, timeout=600.0)
+    return OpenAI(
+        api_key="EMPTY",
+        base_url=settings.api_base_url,
+        timeout=timeout_seconds,
+    )
 
 
 def validate_prompt_budget(
@@ -65,6 +73,8 @@ def analyze_image(
     enable_thinking: bool = False,
     client: Any | None = None,
     max_tokens: int | None = None,
+    ignore_eos: bool = False,
+    request_timeout_seconds: float = 600.0,
 ) -> Qwen35Result:
     """Send one preflighted image-and-text request to the local Qwen worker."""
 
@@ -75,7 +85,17 @@ def analyze_image(
         settings,
         max_tokens=max_tokens,
     )
-    openai_client = client or _create_openai_client(settings)
+    if request_timeout_seconds <= 0:
+        raise ValueError("request_timeout_seconds must be positive")
+    openai_client = client or _create_openai_client(
+        settings,
+        timeout_seconds=request_timeout_seconds,
+    )
+    extra_body: dict[str, Any] = {
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+    }
+    if ignore_eos:
+        extra_body["ignore_eos"] = True
     response = openai_client.chat.completions.create(
         model=settings.served_model_name,
         messages=[
@@ -92,9 +112,7 @@ def analyze_image(
         ],
         temperature=0,
         max_tokens=output_limit,
-        extra_body={
-            "chat_template_kwargs": {"enable_thinking": enable_thinking},
-        },
+        extra_body=extra_body,
     )
     message = response.choices[0].message
     content = message.content

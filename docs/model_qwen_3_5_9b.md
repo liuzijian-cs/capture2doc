@@ -1,9 +1,12 @@
 # Qwen3.5-9B FP8 输入 Token 与独立 Worker
 
-> 状态：NVIDIA/WSL 原型实现，尚待真实模型冒烟验证  
+> 状态：NVIDIA/WSL 原型实现，单图真实模型冒烟已通过
 > 记录日期：2026-09-03  
 > 模型：`Qwen/Qwen3.5-9B`，ModelScope `master` revision  
 > 目标环境：vLLM 0.28.0、RTX 4070 Ti Super 16GB
+
+实际参数对照、三轮显存记录与当前推荐值见
+[Qwen3.5-9B FP8 参数实测与推荐](model_qwen_3_5_9b_parameters.md)。
 
 Qwen3.5-9B 在 Capture2Doc 中用于关联页面解析结果、过滤无关内容并映射到
 C2D-XML。本阶段先把它作为独立的单图 VLM Worker 验证，不与 PaddleOCR-VL 同时
@@ -21,7 +24,7 @@ C2D-XML。本阶段先把它作为独立的单图 VLM Worker 验证，不与 Pad
 | `max_tokens` | 8192 | 默认最大生成长度 |
 | `max_num_batched_tokens` | 4096 | 通过 chunked prefill 控制单次调度峰值 |
 | `max_num_seqs` | 1 | 独立验证阶段单并发 |
-| KV cache | 1 GiB | 首轮稳定值，后续再向下测试 |
+| KV cache | 1 GiB | 代码默认值；当前实测推荐通过 CLI 覆盖为 640 MiB |
 
 当前 vLLM 0.28.0 中的 `int8_per_channel_weight_only` 只面向 MoE expert；
 Qwen3.5-9B 是 dense 模型，因此 NVIDIA 首轮选择在线 FP8。磁盘快照仍约为 BF16
@@ -102,7 +105,8 @@ processor 渲染真实模板；若完整 prompt 超过 `16384 - 8192 = 8192` tok
 
 Qwen3.5-9B 有 8 个 full-attention 层。仅按 BF16 K/V 粗略估计，完整 16K 序列约需
 512 MiB KV cache；混合 DeltaNet 状态、block 对齐和实现开销仍需余量，因此首轮固定
-1 GiB。通过冒烟测试后再依次验证 768 MiB 和 512 MiB。该配置只约束 cache，不代表
+1 GiB。实测 640 MiB 可为 16K 单序列提供 17788 tokens 的 KV 容量，当前作为 CLI
+推荐覆盖值；512 MiB 只有 14108 tokens，无法覆盖 16K。该配置只约束 cache，不代表
 整个 Worker 的显存上限。
 
 ## 使用方式
@@ -131,10 +135,12 @@ uv run --extra cuda python scripts/smoke_qwen35.py \
 `--host 10.255.255.254`。smoke 会保存原始响应、token 摘要、渲染模板、vLLM 日志和
 显存阶段数据到 `.cache/qwen35-smoke/`。
 
-## 待验证
+长上下文和强制长输出的压力测试方法、边界及命令见
+[Qwen3.5-9B FP8 参数实测与推荐](model_qwen_3_5_9b_parameters.md#长上下文与长输出压力测试)。
 
-- `fp8_per_channel` 是否覆盖预期层，以及模型加载、空闲和推理峰值显存；
+## 后续验证
+
 - 1280 image-token 档对手机文档小字、表格和公式复核的质量；
-- 1 GiB、768 MiB 和 512 MiB KV cache 的稳定性；
+- 640 MiB KV cache 在长输入、长输出和重复运行下的稳定性；
 - 8192 输出 token 是否满足真实 C2D-XML 样本；
 - 单图通过后，多图输入及 PaddleOCR-VL 与 Qwen 的顺序/同时常驻策略。
