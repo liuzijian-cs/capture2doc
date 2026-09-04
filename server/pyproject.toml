@@ -10,6 +10,8 @@ dependencies = []
 cuda = [
     "modelscope>=1.39.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "openai>=3.7.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "pillow>=12.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "transformers>=5.16.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "vllm==0.28.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 

@@ -179,7 +179,7 @@ Android 已完成主要裁边和透视校正，服务端仍需复核方向、页
 
 ### 多页编排器
 
-多页编排器统一采用量化后的 **Qwen3.5**：`cuda-16g` 默认使用 9B 4-bit，`apple-16g` 默认使用 4B 4-bit。两个档位共享相同输入输出契约。编排器接收：
+多页编排器统一采用量化后的 **Qwen3.5**：`cuda-16g` 默认使用 9B FP8，`apple-16g` 默认使用 4B 4-bit。两个档位共享相同输入输出契约。编排器接收：
 
 - 所有页面的标准化解析结果；
 - 标注页码的低分辨率页面缩略图；
@@ -233,14 +233,14 @@ Renderer 必须是确定性转换，不调用 VLM。在线 Publisher 与本地�
 
 | 档位 | 页面解析器 | 多页编排器 | 初始运行策略 |
 |---|---|---|---|
-| `cuda-16g` | PaddleOCR-VL-1.6 完整 pipeline | Qwen3.5-9B 4-bit | Linux/WSL，顺序加载或严格限制显存常驻 |
+| `cuda-16g` | PaddleOCR-VL-1.6 完整 pipeline | Qwen3.5-9B FP8 | Linux/WSL，顺序加载或严格限制显存常驻 |
 | `apple-16g` | PaddleOCR-VL-1.6，Apple Silicon 支持路径 | Qwen3.5-4B 4-bit | MLX 优先，单任务、顺序推理 |
 
 PaddleOCR-VL 官方目前提供 Apple Silicon 使用路径，其中 VLM 可以使用 MLX-VLM；官方已在 Apple M4 上完成精度验证，其他 Apple Silicon 机型仍需项目实测。参考[PaddleOCR-VL Apple Silicon 指南](https://github.com/PaddlePaddle/PaddleOCR/blob/main/docs/version3.x/pipeline_usage/PaddleOCR-VL-Apple-Silicon.md)。
 
 初始部署遵循以下原则：
 
-- NVIDIA 16GB 使用 Qwen3.5-9B 4-bit，并从 16K 或 32K 上下文开始验证；
+- NVIDIA 16GB 使用 Qwen3.5-9B FP8，并从 16K 上下文开始验证；
 - Apple Silicon 16GB 默认使用 Qwen3.5-4B 4-bit；9B 仅作为可选实验，不作为最低配置承诺；
 - 页面解析器和编排器优先顺序执行，避免两个服务同时预占大部分显存；
 - 对多页输入限制单次高分辨率视觉 token，使用缩略图加疑难裁剪；

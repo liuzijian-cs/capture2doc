@@ -1,8 +1,9 @@
 # Capture2Doc Server
 
-Capture2Doc 的本地推理服务。本阶段只实现 NVIDIA/WSL 上独立运行的
-PaddleOCR-VL-1.6 Worker：ModelScope 负责准备模型，vLLM 只加载本地快照，
-暂不包含完整 PaddleOCR pipeline、HTTP 业务 API、Agent 或 C2D-XML 映射。
+Capture2Doc 的本地推理服务。当前提供 NVIDIA/WSL 上可独立验证的
+PaddleOCR-VL-1.6 BF16 Worker 和 Qwen3.5-9B FP8 Worker。ModelScope 负责准备模型，
+vLLM 只加载本地快照；暂不包含完整 PaddleOCR pipeline、HTTP 业务 API、Agent、
+双模型协同或 C2D-XML 映射。
 
 ## 环境准备
 
@@ -12,59 +13,84 @@ PaddleOCR-VL-1.6 Worker：ModelScope 负责准备模型，vLLM 只加载本地�
 uv sync --extra cuda
 ```
 
-模型缓存默认位于 `~/models/modelscope`，开发时无需额外配置环境变量。需要临时
-切换缓存目录时可传入 `--cache-dir`；它的优先级高于 `MODELSCOPE_CACHE`。
-缓存目录不应放入 Git 仓库。
+模型缓存默认位于 `~/models/modelscope`，开发时无需额外配置环境变量。需要临时切换
+缓存目录时可传入 `--cache-dir`；它的优先级高于 `MODELSCOPE_CACHE`。缓存目录不应
+放入 Git 仓库。
 
-## 准备模型
+## PaddleOCR-VL-1.6
 
-准备阶段允许 ModelScope 联网下载官方 BF16 权重，并打印最终快照路径：
+准备官方 BF16 权重：
 
 ```bash
 uv run --extra cuda python scripts/prepare_paddleocr_vl.py
 ```
 
-模型固定为 `PaddlePaddle/PaddleOCR-VL-1.6`，初始 revision 为 `master`。
-
-## 单图冒烟测试
+执行单图 OCR 冒烟测试：
 
 ```bash
 uv run --extra cuda python scripts/smoke_paddleocr_vl.py \
   --image /absolute/path/document.jpg
 ```
 
-默认推理参数为 `max_pixels=1003520`（最多约 1280 image tokens）、
+默认参数为 `max_pixels=1003520`（最多约 1280 image tokens）、
 `max_tokens=4096`、`max_model_len=8192`、`max_num_batched_tokens=4096`、
-`max_num_seqs=1` 和固定 `256 MiB` KV cache。固定 KV cache 模式不会同时传递
-`gpu_memory_utilization`。
+`max_num_seqs=1` 和固定 256 MiB KV cache。结果保存在
+`.cache/paddleocr-vl-smoke/`。
 
-WSL2 会自动为 Worker 子进程启用 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`，不会覆盖用户已经
-设置的值。若 mirrored networking 导致 `127.0.0.1` 没有走标准 loopback，可显式指定
-已经验证可达的本机地址：
+## Qwen3.5-9B FP8
+
+准备 `Qwen/Qwen3.5-9B@master` 官方 BF16 快照：
 
 ```bash
-uv run --extra cuda python scripts/smoke_paddleocr_vl.py \
+uv run --extra cuda python scripts/prepare_qwen35.py
+```
+
+磁盘缓存仍为 BF16；vLLM 加载时通过 `fp8_per_channel` 在线量化。不使用
+BitsAndBytes 或第三方量化权重。
+
+先检查同一张图片的 chat template 和 token，不加载模型权重：
+
+```bash
+uv run --extra cuda python scripts/inspect_qwen35_tokens.py \
+  --image /absolute/path/document.jpg
+```
+
+再启动独立 Worker 并发送单图请求：
+
+```bash
+uv run --extra cuda python scripts/smoke_qwen35.py \
+  --image /absolute/path/document.jpg
+```
+
+Qwen 默认使用 `max_pixels=1310720`（最多约 1280 image tokens）、
+`max_tokens=8192`、`max_model_len=16384`、`max_num_batched_tokens=4096`、
+`max_num_seqs=1` 和固定 1 GiB KV cache。thinking 默认关闭。请求前会保留完整 8192
+输出空间；prompt 超过 8192 tokens 时直接失败，不自动截断。
+
+smoke 输出位于 `.cache/qwen35-smoke/`，包含原始响应、token 摘要、渲染模板、
+vLLM 日志，以及启动前、模型加载后、推理峰值和退出后的 GPU 全局显存。
+
+## WSL 兼容和资源覆盖
+
+WSL2 会自动为 Worker 子进程启用 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`，不会覆盖用户已经
+设置的值。若 mirrored networking 导致 `127.0.0.1` 没有走标准 loopback，可显式
+使用当前机器已验证可达的地址：
+
+```bash
+uv run --extra cuda python scripts/smoke_qwen35.py \
   --image /absolute/path/document.jpg \
   --host 10.255.255.254
 ```
 
+Paddle smoke 同样支持 `--host 10.255.255.254`。
+
 当前 CUDA 13 环境中的 FlashInfer sampler JIT 与随包提供的 CUB 不兼容，Worker 默认
-设置 `VLLM_USE_FLASHINFER_SAMPLER=0`，回退到 vLLM 的 PyTorch sampler。该默认值同样
-不会覆盖用户显式设置，后续依赖兼容后可以单独重新验证 FlashInfer。
+设置 `VLLM_USE_FLASHINFER_SAMPLER=0`，回退到 vLLM 的 PyTorch sampler。该值不会
+覆盖用户显式配置。
 
-所有主要资源参数都可临时覆盖。`--kv-cache-memory-bytes` 与
-`--gpu-memory-utilization` 互斥；选择比例模式时会关闭默认固定 KV cache。例如：
+两个 smoke 脚本都允许覆盖主要资源参数。`--kv-cache-memory-bytes` 与
+`--gpu-memory-utilization` 互斥；选择比例模式时会关闭默认固定 KV cache。prepare
+允许联网，inspect 和 smoke 只读取已经缓存的本地快照，不会隐式下载。
 
-```bash
-uv run --extra cuda python scripts/smoke_paddleocr_vl.py \
-  --image /absolute/path/document.jpg \
-  --gpu-memory-utilization 0.2
-```
-
-测试只读取已经缓存的本地快照，不会隐式下载。脚本会启动 vLLM、等待健康检查、
-发送 `OCR:` 请求，将原始响应、计时摘要和 Worker 日志保存到
-`.cache/paddleocr-vl-smoke/`，最后关闭 Worker。`summary.json` 会同时记录实际生效的
-推理参数、响应 token usage 和 `finish_reason`。
-
-参考：[ModelScope 模型卡](https://modelscope.cn/models/PaddlePaddle/PaddleOCR-VL-1.6)、
-[vLLM PaddleOCR-VL recipe](https://github.com/vllm-project/recipes/blob/main/PaddlePaddle/PaddleOCR-VL.md)。
+详细说明见 [PaddleOCR-VL-1.6 输入 Token 与调优](../docs/model_paddle_ocr_v_1_6.md)
+和 [Qwen3.5-9B FP8 输入 Token 与独立 Worker](../docs/model_qwen_3_5_9b.md)。

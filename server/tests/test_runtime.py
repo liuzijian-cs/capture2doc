@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from capture2doc.config import PaddleOcrVlSettings
+from capture2doc.config import PaddleOcrVlSettings, Qwen35Settings
 from capture2doc.inference import runtime as runtime_module
 from capture2doc.inference.runtime import RuntimeStartError, VllmRuntime
 
@@ -52,6 +52,29 @@ def test_build_command_can_use_gpu_utilization_instead(tmp_path: Path) -> None:
 
     assert command[command.index("--gpu-memory-utilization") + 1] == "0.2"
     assert "--kv-cache-memory-bytes" not in command
+
+
+def test_build_command_contains_qwen35_fp8_settings(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    settings = Qwen35Settings(cache_dir=tmp_path / "cache")
+    runtime = VllmRuntime(settings, model_path, tmp_path / "qwen.log")
+
+    command = runtime.build_command()
+
+    assert command[command.index("--port") + 1] == "8119"
+    assert command[command.index("--quantization") + 1] == "fp8_per_channel"
+    assert command[command.index("--max-model-len") + 1] == "16384"
+    assert command[command.index("--max-num-batched-tokens") + 1] == "4096"
+    assert command[command.index("--kv-cache-memory-bytes") + 1] == "1073741824"
+    assert command[command.index("--mm-processor-kwargs") + 1] == '{"max_pixels":1310720}'
+    assert command[command.index("--limit-mm-per-prompt") + 1] == '{"image":1}'
+    assert command[command.index("--reasoning-parser") + 1] == "qwen3"
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
+    assert "--enable-chunked-prefill" in command
+    assert "--trust-remote-code" not in command
 
 
 def test_build_environment_enables_wsl_pin_memory(

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from capture2doc.config import MODELSCOPE_CACHE_ENV, PaddleOcrVlSettings
+from capture2doc.config import MODELSCOPE_CACHE_ENV, VllmWorkerSettings
 
 SnapshotDownload = Callable[..., str]
 
@@ -27,7 +27,7 @@ def _snapshot_download() -> SnapshotDownload:
 
 
 def prepare_model(
-    settings: PaddleOcrVlSettings,
+    settings: VllmWorkerSettings,
     *,
     snapshot_download_fn: SnapshotDownload | None = None,
 ) -> Path:
@@ -45,7 +45,7 @@ def prepare_model(
 
 
 def resolve_prepared_model(
-    settings: PaddleOcrVlSettings,
+    settings: VllmWorkerSettings,
     *,
     snapshot_download_fn: SnapshotDownload | None = None,
 ) -> Path:
@@ -54,7 +54,7 @@ def resolve_prepared_model(
     if not settings.cache_dir.is_dir():
         raise ModelNotPreparedError(
             f"ModelScope cache does not exist: {settings.cache_dir}. "
-            "Run scripts/prepare_paddleocr_vl.py first."
+            f"Run scripts/{settings.prepare_script_name} first."
         )
 
     os.environ[MODELSCOPE_CACHE_ENV] = str(settings.cache_dir)
@@ -69,7 +69,7 @@ def resolve_prepared_model(
     except Exception as exc:
         raise ModelNotPreparedError(
             f"No local snapshot for {settings.model_id}@{settings.revision} in "
-            f"{settings.cache_dir}. Run scripts/prepare_paddleocr_vl.py first."
+            f"{settings.cache_dir}. Run scripts/{settings.prepare_script_name} first."
         ) from exc
 
     path = Path(snapshot).expanduser().resolve()

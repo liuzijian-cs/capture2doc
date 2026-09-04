@@ -13,11 +13,12 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 - [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。
+- [Qwen3.5-9B FP8 输入 Token 与独立 Worker](model_qwen_3_5_9b.md)：图像 token、chat template、16K/8K 预算、量化和显存验证方法。
 
 ## 当前决策
 
 - 系统边界：Android App 负责拍照/视频采集和页面预处理，本地服务端接收页面图片流并完成解析、组装和导出。
-- 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B 4-bit，Apple Silicon 默认 4B 4-bit。
+- 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
 - 中间表示：C2D-XML v0.1 标签基线已经冻结，只保留最终文档的逻辑结构、内容、顺序和有限行内样式；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。下一步编写对应 XSD。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 
