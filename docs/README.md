@@ -14,6 +14,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 
 - [Android 任务首页与采集任务](android_task_home.md)：本轮最新交互、实现状态及验证结果。
 - [Android / Server 文档任务协议 v1](android_task_protocol.md)：Android 发起的创建、JPEG 上传、最终页序与状态查询提案；服务端待接入。
+- [Android 富文本剪贴板协议](android_clipboard_protocol.md)：飞书与思源剪贴板实测、Android HTML/纯文本公共契约、C2D 映射及真机验收矩阵。
 
 - [Android 开发成果、设计演变与后续计划](android_progress_and_plan.md)：本轮完整成果、旧方案对照、提交与验证证据、原型入口和后续依赖。
 - [扫描 Pipeline](capture_pipeline.md)：本地与联网流程、逐页上传/OCR、最终输入冻结、内容幂等、乱序和恢复边界；跨端流程统一依据。
