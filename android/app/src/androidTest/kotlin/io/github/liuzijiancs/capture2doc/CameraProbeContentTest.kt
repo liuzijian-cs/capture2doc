@@ -33,6 +33,19 @@ class CameraProbeContentTest {
     val composeRule = createComposeRule()
 
     private var state by mutableStateOf(CameraProbeUiState())
+    private var disconnected by mutableStateOf(false)
+
+    @Test fun connectionWarningDoesNotResizeViewportOrDisableCaptureAndFinish() {
+        state = CameraProbeUiState(gate = CameraGateState.Ready, draftReady = true,
+            candidates = listOf(testCandidate("one")))
+        setProbeContent(cameraSessionAvailable = true)
+        val before = composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT).getUnclippedBoundsInRoot()
+        composeRule.runOnIdle { disconnected = true }
+        composeRule.onNodeWithTag(CameraProbeTags.CONNECTION_WARNING).assertIsDisplayed()
+        composeRule.onNodeWithTag(CameraProbeTags.SHUTTER).assertIsEnabled()
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsEnabled()
+        assertEquals(before, composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT).getUnclippedBoundsInRoot())
+    }
 
     @Test
     fun rendersEveryCameraGateState() {
@@ -289,6 +302,7 @@ class CameraProbeContentTest {
                     onClearFocus = {},
                     cameraPreview = {},
                     landscapeLayoutOverride = landscapeLayoutOverride,
+                    disconnected = disconnected,
                 )
             }
         }

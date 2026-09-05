@@ -10,8 +10,12 @@ exifInterface = "1.4.2"
 androidxJunit = "1.2.1"
 espressoCore = "3.6.1"
 junit = "4.13.2"
+work = "2.11.2"
+jsonJvmTest = "20240303"
 
 [libraries]
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+json-jvm-test = { module = "org.json:json", version.ref = "jsonJvmTest" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }

@@ -52,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -128,6 +129,7 @@ object CameraProbeTags {
     const val PREVIEW = "camera_probe_candidate_preview"
     const val CANDIDATE_PROGRESS = "camera_probe_candidate_progress"
     const val CANDIDATE_ERROR = "camera_probe_candidate_error"
+    const val CONNECTION_WARNING = "camera_connection_warning"
 
     fun candidate(pageId: String): String = "camera_probe_candidate_$pageId"
 }
@@ -136,8 +138,9 @@ object CameraProbeTags {
 internal fun CameraProbeRoute(
     onBack: (hasAcceptedCaptureOrPage: Boolean) -> Unit,
     onDraftReady: () -> Unit,
-    retakePageId: String? = null,
     modifier: Modifier = Modifier,
+    interactionsEnabled: Boolean = true,
+    disconnected: Boolean = false,
     viewModel: CameraProbeViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -165,10 +168,6 @@ internal fun CameraProbeRoute(
         } else {
             viewModel.onCameraUnavailable()
         }
-    }
-
-    LaunchedEffect(retakePageId) {
-        viewModel.initializeSession(retakePageId)
     }
 
     DisposableEffect(lifecycleOwner, hasCamera) {
@@ -213,18 +212,19 @@ internal fun CameraProbeRoute(
     CameraProbeContent(
         uiState = uiState,
         cameraSessionAvailable = cameraSession != null,
+        disconnected = disconnected,
         onBack = navigateBack,
         onRequestPermission = {
             viewModel.onPermissionRequestStarted()
             permissionLauncher.launch(Manifest.permission.CAMERA)
         },
         onOpenSettings = { context.openAppSettings() },
-        onCapture = { cameraSession?.let(viewModel::capture) },
+        onCapture = { if (interactionsEnabled) cameraSession?.let(viewModel::capture) },
         onFinish = {
-            if (viewModel.canFinishNow()) onDraftReady()
+            if (interactionsEnabled && viewModel.canFinishNow()) onDraftReady()
         },
-        onDeleteCandidate = viewModel::deleteCandidate,
-        onMoveCandidate = viewModel::moveCandidate,
+        onDeleteCandidate = { if (interactionsEnabled) viewModel.deleteCandidate(it) },
+        onMoveCandidate = { id, index -> if (interactionsEnabled) viewModel.moveCandidate(id, index) },
         onRetryCamera = viewModel::retryCamera,
         onFocus = { x, y ->
             cameraSession?.let { session ->
@@ -272,6 +272,7 @@ internal fun CameraProbeContent(
     onClearFocus: (Long) -> Unit,
     cameraPreview: @Composable (Modifier) -> Unit,
     landscapeLayoutOverride: Boolean? = null,
+    disconnected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var previewPageId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -346,6 +347,17 @@ internal fun CameraProbeContent(
                     previewPageId = null
                 },
             )
+        }
+        if (disconnected) Surface(
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                .padding(start = 64.dp, end = 64.dp, top = 12.dp)
+                .testTag(CameraProbeTags.CONNECTION_WARNING),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.statusColors.warningContainer,
+        ) {
+            Text("未连接服务器 · 照片保存在本地", Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                color = MaterialTheme.statusColors.onWarning,
+                style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -1127,6 +1139,7 @@ private fun previewCandidate(
 private fun CameraPreviewFixture(
     state: CameraProbeUiState,
     landscape: Boolean = false,
+    disconnected: Boolean = false,
 ) {
     Capture2DocTheme(darkTheme = true) {
         CameraProbeContent(
@@ -1146,6 +1159,7 @@ private fun CameraPreviewFixture(
                 Box(previewModifier.background(Color(0xFF46515B)))
             },
             landscapeLayoutOverride = landscape,
+            disconnected = disconnected,
         )
     }
 }
@@ -1154,6 +1168,13 @@ private fun CameraPreviewFixture(
 @Composable
 private fun CameraEmptyPreview() {
     CameraPreviewFixture(CameraProbeUiState(gate = CameraGateState.Ready))
+}
+
+@Preview(name = "Camera offline", widthDp = 393, heightDp = 852)
+@Preview(name = "Camera offline large font", widthDp = 360, heightDp = 780, fontScale = 1.5f)
+@Composable
+private fun CameraOfflinePreview() {
+    CameraPreviewFixture(CameraProbeUiState(gate = CameraGateState.Ready), disconnected = true)
 }
 
 @Preview(name = "Camera saving", widthDp = 393, heightDp = 852)

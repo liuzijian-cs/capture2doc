@@ -16,6 +16,7 @@ import io.github.liuzijiancs.capture2doc.core.model.CaptureTimings
 import io.github.liuzijiancs.capture2doc.core.model.SCAN_PAGE_INVALID_ORIGINAL_MESSAGE
 import io.github.liuzijiancs.capture2doc.core.model.ScanPage
 import io.github.liuzijiancs.capture2doc.core.model.ScanPageState
+import io.github.liuzijiancs.capture2doc.data.capture2doc.draft.ScanDraftRepository
 import io.github.liuzijiancs.capture2doc.data.capture2doc.image.ImageSize
 import java.io.File
 import java.time.LocalDateTime
@@ -91,18 +92,18 @@ internal data class CameraProbeUiState(
     val postviewSupported: Boolean = false,
     val draftReady: Boolean = false,
     val draftMutationInProgress: Boolean = false,
-    val retakePreparationInProgress: Boolean = false,
+    val workflowBlocked: Boolean = false,
 ) {
     internal val canCapture: Boolean
         get() = gate is CameraGateState.Ready &&
+            !workflowBlocked &&
             draftReady &&
-            !retakePreparationInProgress &&
             !draftMutationInProgress &&
             canAcceptCapture(captureJobs.map(CaptureJob::stage))
 
     internal val canFinish: Boolean
         get() = draftReady &&
-            !retakePreparationInProgress &&
+            !workflowBlocked &&
             canFinishCandidates(candidates, draftMutationInProgress) &&
             captureJobs.none { it.stage.countsAgainstCaptureLimit } &&
             captureJobs.filter { it.stage == CaptureStage.NORMALIZING }.all { job ->
@@ -129,20 +130,17 @@ internal fun canFinishCandidates(
 
 internal class CameraProbeViewModel(
     application: Application,
+    private val draftRepository: ScanDraftRepository = (application as Capture2DocApplication).scanDraftRepository,
 ) : AndroidViewModel(application) {
-    private val draftRepository = getApplication<Capture2DocApplication>().scanDraftRepository
     private val _uiState = MutableStateFlow(CameraProbeUiState())
     private val normalizationJobs = mutableMapOf<String, Job>()
     private val tombstonedPageIds = mutableSetOf<String>()
     private val pendingDeletedPageIds = mutableSetOf<String>()
     private val reservationInFlightPageIds = mutableSetOf<String>()
-    private var retakeInFlightPageId: String? = null
     private var draftPages: List<ScanPage> = emptyList()
     private var repositoryInitialized = false
     private var draftMutationCount = 0
     private var nextFocusRequestId = 0L
-    private var requestedRetakePageId: String? = null
-    private var retakePageId: String? = null
 
     val uiState = _uiState.asStateFlow()
 
@@ -150,7 +148,6 @@ internal class CameraProbeViewModel(
         viewModelScope.launch {
             draftRepository.draft.collect { draft ->
                 draftPages = draft?.pages.orEmpty()
-                resolveRetakePage()
                 publishCandidates()
                 if (repositoryInitialized) reconcileTransientJobs()
             }
@@ -161,7 +158,6 @@ internal class CameraProbeViewModel(
                 draftRepository.recoverIncompletePages()
                 repositoryInitialized = true
                 draftPages = draftRepository.draft.value?.pages.orEmpty()
-                resolveRetakePage()
                 _uiState.update { it.copy(draftReady = true) }
                 publishCandidates()
                 reconcileTransientJobs()
@@ -169,12 +165,6 @@ internal class CameraProbeViewModel(
                 onCameraError(error)
             }
         }
-    }
-
-    fun initializeSession(requestedRetakePageId: String?) {
-        this.requestedRetakePageId = requestedRetakePageId
-        resolveRetakePage()
-        publishCandidates()
     }
 
     fun synchronizePermission(granted: Boolean) {
@@ -257,9 +247,7 @@ internal class CameraProbeViewModel(
     internal fun capture(session: CameraSessionHandle) {
         if (!_uiState.value.canCapture) return
 
-        val shouldReplacePage = retakePageId != null
-        val captureId = retakePageId ?: createCaptureId()
-        retakePageId = null
+        val captureId = createCaptureId()
         val pageFiles = draftRepository.pageFiles(captureId)
         val requestedAt = SystemClock.elapsedRealtime()
         reservationInFlightPageIds += captureId
@@ -279,12 +267,11 @@ internal class CameraProbeViewModel(
                 withContext(Dispatchers.IO) {
                     draftRepository.reservePage(
                         pageId = captureId,
-                        replaceExisting = shouldReplacePage,
+                        replaceExisting = false,
                     )
                 }
             } catch (error: Exception) {
                 reservationInFlightPageIds -= captureId
-                if (shouldReplacePage) retakePageId = captureId
                 failJob(
                     captureId = captureId,
                     message = error.message ?: getApplication<Application>()
@@ -375,6 +362,7 @@ internal class CameraProbeViewModel(
             ?: return
         if (
             !candidate.canDelete ||
+            _uiState.value.workflowBlocked ||
             _uiState.value.draftMutationInProgress ||
             pageId in reservationInFlightPageIds ||
             _uiState.value.captureJobs.any {
@@ -413,6 +401,7 @@ internal class CameraProbeViewModel(
     fun moveCandidate(pageId: String, targetIndex: Int) {
         val candidates = _uiState.value.candidates
         if (
+            _uiState.value.workflowBlocked ||
             _uiState.value.draftMutationInProgress ||
             candidates.none { it.pageId == pageId } ||
             targetIndex !in candidates.indices
@@ -429,42 +418,15 @@ internal class CameraProbeViewModel(
         }
     }
 
-    fun prepareRetake(pageId: String, onPrepared: (Boolean) -> Unit) {
-        val page = draftPages.firstOrNull { it.pageId == pageId }
-        if (
-            page == null ||
-            page.state == ScanPageState.CAPTURING ||
-            _uiState.value.captureJobs.any {
-                it.captureId == pageId && it.stage.countsAgainstCaptureLimit
-            } ||
-            retakeInFlightPageId != null
-        ) {
-            onPrepared(false)
-            return
-        }
-        retakeInFlightPageId = pageId
-        _uiState.update { it.copy(retakePreparationInProgress = true) }
-        viewModelScope.launch {
-            try {
-                val prepared = runCatching {
-                    normalizationJobs.remove(pageId)?.cancelAndJoin()
-                    val result = draftRepository.prepareRetake(pageId)
-                    if (result) removeJob(pageId)
-                    result
-                }.getOrElse { false }
-                onPrepared(prepared)
-            } finally {
-                if (retakeInFlightPageId == pageId) retakeInFlightPageId = null
-                _uiState.update { it.copy(retakePreparationInProgress = false) }
-            }
-        }
-    }
-
     fun retryCamera() {
         _uiState.update { it.copy(gate = CameraGateState.StartingCamera) }
     }
 
     fun canFinishNow(): Boolean = _uiState.value.canFinish
+
+    fun setWorkflowBlocked(blocked: Boolean) {
+        _uiState.update { it.copy(workflowBlocked = blocked) }
+    }
 
     fun onFocusStarted(x: Float, y: Float): Long {
         val requestId = ++nextFocusRequestId
@@ -720,13 +682,6 @@ internal class CameraProbeViewModel(
                     )
                 }
             current.copy(candidates = candidates)
-        }
-    }
-
-    private fun resolveRetakePage() {
-        retakePageId = requestedRetakePageId?.takeIf { pageId ->
-            draftPages.firstOrNull { it.pageId == pageId }?.state ==
-                ScanPageState.RETAKE_REQUIRED
         }
     }
 

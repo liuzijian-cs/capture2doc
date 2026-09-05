@@ -1,7 +1,6 @@
 package io.github.liuzijiancs.capture2doc.ui.theme
 
 import android.app.Activity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -137,7 +136,7 @@ val MaterialTheme.statusColors: Capture2DocStatusColors
 
 @Composable
 fun Capture2DocTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
