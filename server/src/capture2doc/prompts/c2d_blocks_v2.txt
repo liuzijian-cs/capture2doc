@@ -8,13 +8,10 @@ mode=generate 时，先检查整张图片中的全部文档区域，包括并列
 本协议使用 JSON action，由服务端串行调度工具。只输出一个 JSON 对象，不加 Markdown 围栏、解释或 XML 信封。JSON 字符串中的引号、反斜杠和换行必须正确转义；XML 标签本身不进行 HTML 转义。每块分别给出 xml、独立 text、ocr_refs（对应当前图片 source_id 数组；不确定则 []）。text 是该块全部文字，不从损坏 XML 提取，不省略代码和公式。单个 xml 只包含一个完整 C2D 顶层元素，可用默认命名空间 urn:capture2doc:c2d:1。代码是顶层 pre，不能放入 blockquote。
 
 主生成（mode=generate）：
-{"action":"submit","tail":null,"blocks":[{"xml":"<h2>标题</h2>","text":"标题","ocr_refs":["image-1:ocr:0"]},{"xml":"<p><b><span text-color=\"red\">重点</span></b></p>","text":"重点","ocr_refs":[]}],"overlap_claim":null}
-blocks 先完整记录当前图片实际可见的文档内容，包含可能与历史重叠的前缀，严格按阅读顺序；不能自行省略后只交新增部分。不要从 readonly_history、retrieved_history 或工具结果复制图上没有的内容。mutable_tail 为 null 时 tail 必须为 null。只有当前图片确实续接旧尾块时，tail 才返回它的完整新版本（同样有 xml/text/ocr_refs）；不续接则 null，服务端直接保留旧尾块。tail 必须在一个块内原样保留旧尾块的全部文字和代码空白，再追加当前图片内容；不复制到 blocks 中。其他旧块绝不能修改。ocr_refs 只能引用当前图片新增文字来源，不引用旧尾块的文字。
+{"action":"submit","tail":null,"blocks":[{"xml":"<h2>标题</h2>","text":"标题","ocr_refs":["image-1:ocr:0"]},{"xml":"<p><b><span text-color=\"red\">重点</span></b></p>","text":"重点","ocr_refs":[]}]}
+blocks 仅含当前图片的新增块，严格按阅读顺序。不要回传 readonly_history。mutable_tail 为 null 时 tail 必须为 null。只有当前图片确实续接旧尾块时，tail 才返回它的完整新版本（同样有 xml/text/ocr_refs）；不续接则 null，服务端直接保留旧尾块。tail 必须在一个块内原样保留旧尾块的全部文字和代码空白，再追加当前图片内容；不复制到 blocks 中。其他旧块绝不能修改。ocr_refs 只能引用当前图片新增文字来源，不引用旧尾块的文字。
 
-跨图重叠（仅 mode=generate）：服务端主动提供 retrieved_history，可能来自更早的图片；它与 readonly_history、mutable_tail、工具结果都只读。历史检索相似不等于源区域相同。只有当前图片开头明确重复此前同一源区域的连续内容时，才同时给出 overlap_claim；普通重复标题、页眉、短句不构成证据。不确定时 overlap_claim=null，保留全文。
-{"relation":"same_source_prefix_overlap","candidate_prefix_count":2,"history_refs":["上下文给出的第一个 history_ref","上下文给出的下一个 history_ref"],"first_history_match":"full_block","whole_image_has_no_new_content":false}
-candidate_prefix_count 是 blocks 开头拟判重的完整候选数量；history_refs 原样引用实际读到的连续历史块，保持历史顺序。首个可见段落或代码只是对应历史首块的严格后缀时，first_history_match 可用 suffix_of_first_history，其后必须匹配完整历史块。其余情况用 full_block。尾续接 tail 非 null 时 overlap_claim 必须为 null。
-即使整图没有新增内容，也要先返回本图全部观察到的 blocks，再声明 whole_image_has_no_new_content=true，禁止直接返回空列表。服务端会验证文字、数字、代码空白及结构；只有验证后的前缀才省略，失败保留全文待复核。较早历史不能修改；局部修复不能自行删除拟判重文字。
+结构选择修复（mode=repair 且 repair_options 非空时，优先于下面的 submit 修复格式）：服务端仅对可验证的狭窄错误提供完整修复选项。检查它是否适合当前 targets；适合时只返回 {"action":"apply_repair_option","option_id":"原样复制选项ID","attempt_id":"原样复制请求ID","target_versions":{"目标内部ID":0}}。不接受时返回 {"action":"decline_repair_option","attempt_id":"原样复制请求ID","target_versions":{"目标内部ID":0}}。此时不回写 XML/text/blocks，不调用历史工具。服务端只会重新验证并应用你选中的选项，拒绝也消耗本轮修复次数。repair_options 为空时继续使用下面的 submit 修复格式。
 
 局部修复（mode=repair）：本任务只修 targets；上面的整图转录要求仅适用于 generate。图片和 OCR 只用于理解失败位置，不扩大修复内容。blocks 的全部文字拼起来必须恰好等于 targets 的全部文字，不能增加图上其他内容；不要重写整张图片，不回传 neighbors、readonly_history 中的任何块。
 {"action":"submit","attempt_id":"原样复制请求的 attempt_id","target_versions":{"目标内部ID":0},"blocks":[{"xml":"<pre><code>print(1)</code></pre>","text":"print(1)","ocr_refs":[]}]}

@@ -1,0 +1,7 @@
+显式跨图重叠实验（仅 mode=generate）：本节替换上面的主生成格式与“blocks 仅含新增块”要求；局部修复与完整 C2D 规范保持不变。
+主生成返回 {"action":"submit","tail":null,"blocks":[{"xml":"<p>本图正文</p>","text":"本图正文","ocr_refs":[]}],"overlap_claim":null}。
+blocks 先完整记录当前图片实际可见的文档内容，包含可能与历史重叠的前缀，严格按阅读顺序；不能自行省略后只交新增部分。不要从 readonly_history、retrieved_history 或工具结果复制图上没有的内容。
+服务端主动提供 retrieved_history，可能来自更早的图片；它与 readonly_history、mutable_tail、工具结果都只读。历史检索相似不等于源区域相同。只有当前图片开头明确重复此前同一源区域的连续内容时，才同时给出 overlap_claim；普通重复标题、页眉、短句不构成证据。不确定时 overlap_claim=null，保留全文。
+{"relation":"same_source_prefix_overlap","candidate_prefix_count":2,"history_refs":["上下文给出的第一个 history_ref","上下文给出的下一个 history_ref"],"first_history_match":"full_block","whole_image_has_no_new_content":false}
+candidate_prefix_count 是 blocks 开头拟判重的完整候选数量；history_refs 原样引用实际读到的连续历史块，保持历史顺序。首个可见段落或代码只是对应历史首块的严格后缀时，first_history_match 可用 suffix_of_first_history，其后必须匹配完整历史块。其余情况用 full_block。尾续接 tail 非 null 时 overlap_claim 必须为 null。
+即使整图没有新增内容，也要先返回本图全部观察到的 blocks，再声明 whole_image_has_no_new_content=true，禁止直接返回空列表。服务端会验证文字、数字、代码空白及结构；只有验证后的前缀才省略，失败保留全文待复核。较早历史不能修改；局部修复不能自行删除拟判重文字。

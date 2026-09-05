@@ -13,7 +13,18 @@ from capture2doc.pipeline import document as pipeline
 from capture2doc.pipeline.document import BlockStore
 from capture2doc.pipeline.overlap import RELATION, history_item
 from capture2doc.pipeline.protocol import response_schema
-from test_block_pipeline import Models, block, result, run, setup, submit
+from test_block_pipeline import (
+    Models,
+    block,
+    result,
+    run as run_baseline,
+    setup,
+    submit,
+)
+
+
+def run(store, models, **kwargs):
+    return run_baseline(store, models, enable_overlap_generation=True, **kwargs)
 
 
 BODY = (
@@ -351,7 +362,9 @@ def test_received_overlap_proposal_resume_uses_saved_sent_history_without_regene
 
 
 def test_generate_schema_has_bounded_nullable_claim_and_no_repair_authority():
-    generate = response_schema("generate", "irrelevant-random-id", {})["anyOf"][0]
+    generate = response_schema(
+        "generate", "irrelevant-random-id", {}, enable_overlap_generation=True
+    )["anyOf"][0]
     assert "attempt_id" not in generate["properties"]
     assert "target_versions" not in generate["properties"]
     claim = generate["properties"]["overlap_claim"]["anyOf"]

@@ -52,7 +52,11 @@ def style_examples() -> list[dict[str, str]]:
     return examples
 
 
-def blocks_system_prompt(*, include_style_examples: bool = False) -> str:
+def blocks_system_prompt(
+    *,
+    include_style_examples: bool = False,
+    include_overlap_experiment: bool = False,
+) -> str:
     """Full contract; extended style examples remain an explicit experiment.
 
     The eight-image R3 evaluation regressed numerical transcription with the
@@ -62,6 +66,12 @@ def blocks_system_prompt(*, include_style_examples: bool = False) -> str:
         files(__package__).joinpath(name).read_text(encoding="utf-8")
         for name in ("c2d_blocks_v2.txt", "c2d_contract_v2.txt")
     ]
+    if include_overlap_experiment:
+        instructions.append(
+            files(__package__)
+            .joinpath("c2d_overlap_experiment_v2.txt")
+            .read_text(encoding="utf-8")
+        )
     if include_style_examples:
         instructions.append(
             "通用样式 few-shot：visual_fact 仅说明可见条件，不是输出字段。"

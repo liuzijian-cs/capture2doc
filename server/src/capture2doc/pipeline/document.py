@@ -42,6 +42,7 @@ from .draft import (
 from .models import verify_previous_cleanup
 from .overlap import bind_overlap, history_item, resolve_overlap, retrieve_history
 from .protocol import response_schema
+from .repair_options import repair_options
 from .runner import finish_reason
 from .store import DocumentStore, atomic_write, digest, now, write_json
 
@@ -231,7 +232,13 @@ def run_ocr(store: BlockStore, models: Any, image_id: str) -> None:
     store.save()
 
 
-def history_view(block: dict, index: int) -> dict:
+def overlap_enabled(state: dict) -> bool:
+    return (state.get("contract") or {}).get("overlap_generation") is True
+
+
+def history_view(
+    block: dict, index: int, *, include_overlap_reference: bool = False
+) -> dict:
     result = {
         "block_id": index,
         "version": block["version"],
@@ -239,14 +246,17 @@ def history_view(block: dict, index: int) -> dict:
         "xml": block["xml"],
         "status": block["status"],
     }
-    try:
-        result["history_ref"] = history_item(block, index)["history_ref"]
-    except ValueError:
-        pass  # Fallback/unresolved history remains readable, but cannot authorize omission.
+    if include_overlap_reference:
+        try:
+            result["history_ref"] = history_item(block, index)["history_ref"]
+        except ValueError:
+            pass  # Fallback/unresolved history cannot authorize omission.
     return result
 
 
-def history_tool(proposal: dict, blocks: list[dict]) -> dict:
+def history_tool(
+    proposal: dict, blocks: list[dict], *, include_overlap_reference: bool = False
+) -> dict:
     action = proposal.get("action")
     if action == "read_blocks":
         ids = proposal.get("block_ids")
@@ -263,7 +273,14 @@ def history_tool(proposal: dict, blocks: list[dict]) -> dict:
         ids = [i for i, b in enumerate(blocks) if query in (b["text"] or "")][:3]
     else:
         return {"error": "未知只读工具，仅可 read_blocks/search_blocks。"}
-    return {"blocks": [history_view(blocks[i], i) for i in ids]}
+    return {
+        "blocks": [
+            history_view(
+                blocks[i], i, include_overlap_reference=include_overlap_reference
+            )
+            for i in ids
+        ]
+    }
 
 
 def request_context(state: dict, draft: dict, attempt: dict) -> dict:
@@ -301,19 +318,18 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
                 if n["id"] not in attempt["targets"] and n not in neighbors:
                     neighbors.append(n)
     generating = attempt["kind"] == "generate"
+    overlap = generating and overlap_enabled(state)
     tail = draft["old_tail"]
     tail_index = len(committed) - 1 if tail else None
     recent = [
-        history_view(committed[i], i)
+        history_view(committed[i], i, include_overlap_reference=overlap)
         for i in range(max(0, len(committed) - 3), len(committed))
         if i != tail_index
     ]
     visible_indices = {item["block_id"] for item in recent}
     if tail_index is not None:
         visible_indices.add(tail_index)
-    retrieved = (
-        retrieve_history(committed, image["ocr"]["content"]) if generating else []
-    )
+    retrieved = retrieve_history(committed, image["ocr"]["content"]) if overlap else []
     payload = {
         "mode": "generate" if attempt["kind"] == "generate" else "repair",
         "task_scope": (
@@ -324,19 +340,25 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
         "image_id": draft["image_id"],
         "ocr_complete": image["ocr"].get("complete", False),
         "ocr_sources": image["sources"],
-        "mutable_tail": (history_view(tail, tail_index) if generating else view(tail))
+        "mutable_tail": (
+            history_view(tail, tail_index, include_overlap_reference=overlap)
+            if generating
+            else view(tail)
+        )
         if tail
         else None,
         "document_has_title": any("<title" in (b["xml"] or "") for b in committed),
         "history_block_count": len(committed),
         "readonly_history": recent,
-        "retrieved_history": [
-            item for item in retrieved if item["block_id"] not in visible_indices
-        ],
         "complete_examples": examples(),
         "tool_results": [],
     }
+    if overlap:
+        payload["retrieved_history"] = [
+            item for item in retrieved if item["block_id"] not in visible_indices
+        ]
     if not generating:
+        options = current_repair_options(draft, attempt)
         payload.update(
             targets=targets,
             neighbors=[view(b) for b in neighbors],
@@ -344,8 +366,96 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
             target_versions=attempt["target_versions"],
             allowed_modify_ids=attempt["targets"],
             repair_wave=draft["wave"],
+            repair_options=options,
         )
+        if options:
+            payload["task_scope"] = (
+                "结构选择修复：检查当前 targets 与已验证 repair_options；"
+                "只选择 apply_repair_option 或 decline_repair_option，"
+                "原样返回 attempt_id/target_versions，不重写 blocks、不调用历史工具。"
+            )
     return payload
+
+
+def current_repair_options(draft: dict, attempt: dict) -> list[dict]:
+    if attempt["kind"] != "repair" or len(attempt["targets"]) != 1:
+        return []
+    target_id = attempt["targets"][0]
+    target = next((b for b in draft["blocks"] if b["id"] == target_id), None)
+    if target is None or target["version"] != attempt["target_versions"].get(target_id):
+        return []
+    return repair_options(target)
+
+
+def apply_repair_proposal(draft: dict, attempt: dict, proposal: dict) -> None:
+    """Resolve an actually offered choice again, then use the normal patch guard."""
+    if (
+        attempt["status"] == "applied"
+        or draft["active_attempt"] != attempt["attempt_id"]
+    ):
+        raise RejectedPatch("Duplicate or inactive attempt")
+    offered = attempt.get("sent_repair_options", [])
+    action = proposal.get("action")
+    if not offered:
+        if action != "submit":
+            raise RejectedPatch(
+                "REPAIR_OPTION_NOT_OFFERED: 本次请求没有发送可选择的结构修复选项。"
+            )
+        apply_patch(draft, attempt, proposal)
+        return
+    fields = {"action", "attempt_id", "target_versions"}
+    if action == "apply_repair_option":
+        fields.add("option_id")
+    if (
+        action not in {"apply_repair_option", "decline_repair_option"}
+        or set(proposal) != fields
+        or proposal["attempt_id"] != attempt["attempt_id"]
+        or not isinstance(proposal["target_versions"], dict)
+        or any(
+            type(version) is not int for version in proposal["target_versions"].values()
+        )
+        or proposal["target_versions"] != attempt["target_versions"]
+    ):
+        raise RejectedPatch(
+            "REPAIR_OPTION_SCOPE_INVALID: 只能选择或拒绝本次选项，原样保留尝试ID和目标版本，不得夹带 blocks。"
+        )
+    current = current_repair_options(draft, attempt)
+    if not current or any(option not in current for option in offered):
+        raise RejectedPatch(
+            "REPAIR_OPTION_STALE: 当前目标身份、版本、原文或可验证选项已变化。"
+        )
+    if action == "decline_repair_option":
+        attempt["repair_option_decision"] = {"action": action}
+        raise RejectedPatch(
+            "REPAIR_OPTION_DECLINED: 模型拒绝本轮已验证结构选项；保留原候选，本轮计入原修复预算。"
+        )
+    selected = next(
+        (
+            o
+            for o in current
+            if o["option_id"] == proposal["option_id"] and o in offered
+        ),
+        None,
+    )
+    if selected is None:
+        raise RejectedPatch(
+            "REPAIR_OPTION_NOT_OFFERED: option_id 不属于本次实际发送且仍有效的选项。"
+        )
+    apply_patch(
+        draft,
+        attempt,
+        {
+            "attempt_id": proposal["attempt_id"],
+            "target_versions": proposal["target_versions"],
+            "blocks": deepcopy(selected["blocks"]),
+        },
+    )
+    attempt["repair_option_decision"] = {
+        "action": action,
+        "option_id": selected["option_id"],
+        "source_sha256": selected["source_sha256"],
+        "candidate_sha256": selected["candidate_sha256"],
+    }
 
 
 def remember_sent_history(attempt: dict, payload: dict) -> None:
@@ -364,6 +474,7 @@ def remember_sent_history(attempt: dict, payload: dict) -> None:
         if isinstance(item.get("history_ref"), str):
             known.setdefault(item["history_ref"], deepcopy(item))
     attempt["sent_overlap_history"] = list(known.values())
+    attempt["sent_repair_options"] = deepcopy(payload.get("repair_options", []))
 
 
 def get_proposal(
@@ -378,7 +489,11 @@ def get_proposal(
         return attempt["proposal"]
     payload = request_context(store.state, draft, attempt)
     schema = response_schema(
-        payload["mode"], attempt["attempt_id"], attempt["target_versions"]
+        payload["mode"],
+        attempt["attempt_id"],
+        attempt["target_versions"],
+        options=payload.get("repair_options"),
+        enable_overlap_generation=overlap_enabled(store.state),
     )
     path = store.root / store.state["images"][draft["image_id"]]["model_path"]
     call_index = 0
@@ -407,7 +522,7 @@ def get_proposal(
                 )
                 if output >= 512:
                     break
-                if payload["retrieved_history"]:
+                if payload.get("retrieved_history"):
                     payload["retrieved_history"].pop(0)
                     payload["history_context_trimmed"] = True
                 elif len(payload["readonly_history"]) > (
@@ -472,17 +587,32 @@ def get_proposal(
             raise RejectedPatch(f"JSON_INVALID: {exc}") from exc
         if not isinstance(proposal, dict):
             raise RejectedPatch("JSON_OBJECT_REQUIRED")
-        if proposal.get("action") == "submit":
+        terminal = (
+            {"apply_repair_option", "decline_repair_option"}
+            if payload.get("repair_options")
+            else {"submit"}
+        )
+        if proposal.get("action") in terminal:
             attempt["proposal"] = proposal
             store.save()
             return proposal
+        if payload.get("repair_options"):
+            raise RejectedPatch(
+                "REPAIR_OPTION_CHOICE_REQUIRED: 本轮只能选择或拒绝已验证选项，不能重写 blocks 或调用工具。"
+            )
         if proposal.get("action") not in {"read_blocks", "search_blocks"}:
             raise RejectedPatch(
                 "ACTION_INVALID: 仅允许 submit/read_blocks/search_blocks"
             )
         if call_index == MAX_READS:
             raise RejectedPatch("HISTORY_TOOL_BUDGET_EXHAUSTED")
-        tool_result = history_tool(proposal, store.state["blocks"])
+        tool_result = history_tool(
+            proposal,
+            store.state["blocks"],
+            include_overlap_reference=(
+                payload["mode"] == "generate" and overlap_enabled(store.state)
+            ),
+        )
         call["tool_request"] = proposal
         call["tool_result"] = tool_result
         store.save()
@@ -543,12 +673,21 @@ def run_batch(
         try:
             proposal = get_proposal(store, models, draft, attempt, system)
             initialize(draft, proposal)
-            bind_overlap(
-                draft,
-                proposal.get("overlap_claim"),
-                attempt.get("sent_overlap_history", []),
-                committed=state["blocks"],
-            )
+            if overlap_enabled(state):
+                bind_overlap(
+                    draft,
+                    proposal.get("overlap_claim"),
+                    attempt.get("sent_overlap_history", []),
+                    committed=state["blocks"],
+                )
+            elif proposal.get("overlap_claim") is not None:
+                draft["overlap_warnings"] = [
+                    {
+                        "code": "OVERLAP_GENERATION_DISABLED",
+                        "message": "当前配置未启用重叠实验，忽略声明并保留全部候选正文。",
+                        "needs_review": True,
+                    }
+                ]
             attempt["status"] = "applied"
             draft["active_attempt"] = None
         except RejectedPatch as exc:
@@ -594,7 +733,7 @@ def run_batch(
         )
         try:
             proposal = get_proposal(store, models, draft, attempt, system)
-            apply_patch(draft, attempt, proposal)
+            apply_repair_proposal(draft, attempt, proposal)
         except RejectedPatch as exc:
             failed_attempt(
                 draft,
@@ -604,7 +743,8 @@ def run_batch(
         check_combined(state["blocks"], draft)
         store.save()
     resolve_fallback(draft, state["images"][image_id]["sources"], state["blocks"])
-    resolve_overlap(draft, state["blocks"])
+    if overlap_enabled(state):
+        resolve_overlap(draft, state["blocks"])
     blocks = commit_blocks(state["blocks"], draft)
     document_xml(blocks, state["lang"])
     draft["committed"] = True
@@ -629,6 +769,16 @@ def run_batch(
             "overlap_warnings": deepcopy(draft.get("overlap_warnings", [])),
             "repair_calls": sum(
                 len(a["calls"]) for a in draft["attempts"] if a["kind"] == "repair"
+            ),
+            "repair_option_selections": sum(
+                a.get("repair_option_decision", {}).get("action")
+                == "apply_repair_option"
+                for a in draft["attempts"]
+            ),
+            "repair_option_declines": sum(
+                a.get("repair_option_decision", {}).get("action")
+                == "decline_repair_option"
+                for a in draft["attempts"]
             ),
         }
     )
@@ -776,11 +926,21 @@ def run_document_v2(
     models: Any,
     *,
     reuse_ocr_from: Path | None = None,
+    enable_overlap_generation: bool = False,
     progress: Callable[[str], None] = print,
 ) -> Path:
     state = store.state
     store.verify_committed()
     verify_previous_cleanup(store.root / "runs")
+    previous_contract = state.get("contract")
+    if (
+        previous_contract is not None
+        and "overlap_generation" in previous_contract
+        and previous_contract["overlap_generation"] != enable_overlap_generation
+    ):
+        raise ValueError(
+            "Prompt/model/configuration changed (overlap generation); use a new output directory"
+        )
     if state["status"] == "completed":
         if len(state["batches"]) != len(state["ordered_image_ids"]):
             raise ValueError("CHECKPOINT_CORRUPT: completed input cursor mismatch")
@@ -789,11 +949,14 @@ def run_document_v2(
     state["runs"].append(run)
     directory = store.root / "runs" / run["run_id"]
     try:
-        system = blocks_system_prompt()
+        system = blocks_system_prompt(
+            include_overlap_experiment=enable_overlap_generation
+        )
         config = models.prepare()
         store.bind_contract(
             {
                 "pipeline_version": 2,
+                "overlap_generation": enable_overlap_generation,
                 "prompt_sha256": prompt_fingerprint(system),
                 "model_configuration": config,
                 "max_repairs": MAX_REPAIRS,
@@ -804,7 +967,12 @@ def run_document_v2(
                 "response_schema_sha256": digest(
                     json_bytes(
                         [
-                            response_schema("generate", "attempt", {}),
+                            response_schema(
+                                "generate",
+                                "attempt",
+                                {},
+                                enable_overlap_generation=enable_overlap_generation,
+                            ),
                             response_schema("repair", "attempt", {"target": 0}),
                         ]
                     )

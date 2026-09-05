@@ -12,8 +12,38 @@ def object_schema(properties: dict) -> dict:
     }
 
 
-def response_schema(mode: str, attempt_id: str, versions: dict) -> dict:
+def response_schema(
+    mode: str,
+    attempt_id: str,
+    versions: dict,
+    *,
+    options: list[dict] | None = None,
+    enable_overlap_generation: bool = False,
+) -> dict:
     string = {"type": "string"}
+    if mode == "repair" and options:
+        authority = {
+            "attempt_id": {"const": attempt_id},
+            "target_versions": object_schema(
+                {key: {"const": value} for key, value in versions.items()}
+            ),
+        }
+        return {
+            "anyOf": [
+                object_schema(
+                    {
+                        "action": {"const": "apply_repair_option"},
+                        "option_id": {
+                            "enum": [option["option_id"] for option in options]
+                        },
+                        **authority,
+                    }
+                ),
+                object_schema(
+                    {"action": {"const": "decline_repair_option"}, **authority}
+                ),
+            ]
+        }
     block = object_schema(
         {"xml": string, "text": string, "ocr_refs": {"type": "array", "items": string}}
     )
@@ -26,7 +56,7 @@ def response_schema(mode: str, attempt_id: str, versions: dict) -> dict:
             {key: {"const": value} for key, value in versions.items()}
         )
     fields["blocks"] = {"type": "array", "items": block}
-    if mode == "generate":
+    if mode == "generate" and enable_overlap_generation:
         # Complete observations precede the optional declaration of their prefix.
         fields["overlap_claim"] = {
             "anyOf": [
