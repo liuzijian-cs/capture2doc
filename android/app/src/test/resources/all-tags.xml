@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:capture2doc:c2d:1" schema-version="0.1" xml:lang="zh-CN">
+  <title>流式文档 · 中文 &amp; 特殊字符</title>
+  <h1>一级标题</h1><h2>二级标题</h2><h3>三级标题</h3><h4>四级标题</h4><h5>五级标题</h5><h6>六级标题</h6>
+  <p>混合文本：<a href="https://example.com/?q=a&amp;b=2"><b><em><del><u><code><span text-color="blue" background-color="yellow">带链接的混合样式</span></code></u></del></em></b></a>，普通文字。<br/>下一行：&lt;script&gt; &quot;引号&quot; '单引号'。</p>
+  <p><span text-color="red" background-color="red">红色</span> <span text-color="orange" background-color="orange">橙色</span> <span text-color="yellow" background-color="yellow">黄色</span> <span text-color="green" background-color="green">绿色</span> <span text-color="blue" background-color="blue">蓝色</span> <span text-color="purple" background-color="purple">紫色</span> <span text-color="gray" background-color="gray">灰色</span></p>
+  <blockquote><p>第一层引用</p><blockquote><p>第二层引用</p><ul><li>引用中的列表</li></ul></blockquote></blockquote>
+  <ul><li>第一项<ol><li>嵌套编号<ol><li>第三层</li></ol></li><li>第二个编号</li></ol></li><li>第二项</li></ul>
+  <table><thead><tr><th colspan="3">合并表头</th></tr></thead><tbody><tr><td rowspan="2">跨两行</td><td>甲</td><td>乙</td></tr><tr><td colspan="2">跨两列 &amp; 内容</td></tr></tbody></table>
+  <pre lang="kotlin"><code>fun main() {
+    println("中文 &amp; &lt;内容&gt;")
+    val longLine = "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+}
+</code></pre>
+  <p>公式 <latex>E = mc^2</latex>；长公式 <latex>\sum_{i=1}^{n} x_i + \frac{a}{b} + \int_0^1 f(x)\,dx</latex>。</p>
+  <p>不支持的公式保留源码：<latex>\unsupportedMacro{x}</latex></p>
+  <hr/>
+  <p>正文结束。</p>
+</document>

@@ -260,9 +260,10 @@ class TaskRepositoryInstrumentedTest {
         }
         override suspend fun status(baseUrl: String, documentId: String): RemoteDocument {
             calls += "status"
-            return RemoteDocument(if (finalized) DocumentPhase.COMPLETED else DocumentPhase.IDLE,
+            val xml = if (finalized) "<document xmlns=\"urn:capture2doc:c2d:1\" schema-version=\"0.1\"><p>文档内容</p></document>" else null
+            return RemoteDocument(documentId, if (finalized) DocumentPhase.COMPLETED else DocumentPhase.IDLE,
                 if (finalized) "最终标题" else null, if (finalized) 42 else null,
-                if (finalized) "文档内容" else null, null, emptyMap())
+                xml, xml?.let { io.github.liuzijiancs.capture2doc.data.document.sha256(it.toByteArray()) })
         }
     }
 }

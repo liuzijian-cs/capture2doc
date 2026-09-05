@@ -25,6 +25,7 @@ fun Capture2DocApp() {
     val state by model.state.collectAsStateWithLifecycle()
     val tasks by model.tasks.collectAsStateWithLifecycle()
     val networkAvailable by model.networkAvailable.collectAsStateWithLifecycle()
+    val connection by model.connection.collectAsStateWithLifecycle()
     val displayedTasks = if (networkAvailable) tasks else tasks.map { it.copy(connectionIssue = "网络未连接") }
     val app = LocalContext.current.applicationContext as Capture2DocApplication
     val active = displayedTasks.firstOrNull { it.taskId == state.activeTaskId }
@@ -76,11 +77,16 @@ fun Capture2DocApp() {
             }
         }
         state.destination == TaskDestination.DETAIL && active != null -> Capture2DocTheme(darkTheme = false) {
-            TaskDetailScreen(active, model::goHome, { model.retryTask(active.taskId) })
+            io.github.liuzijiancs.capture2doc.ui.document.DocumentReaderScreen(active, app, networkAvailable,
+                connection.revision, model::goHome, model::openSettings, { model.retryTask(active.taskId) })
+        }
+        state.destination == TaskDestination.SETTINGS -> Capture2DocTheme(darkTheme = false) {
+            ConnectionSettingsScreen(app.connectionSettings, model::goHome, model::settingsSaved)
         }
         else -> Capture2DocTheme(darkTheme = false) {
             HomeScreen(displayedTasks, model::createTask, model::openTask, model::hideTasks,
-                disconnected = !networkAvailable || BuildConfig.SERVICE_BASE_URL.isBlank(),
+                disconnected = !networkAvailable || !connection.configured,
+                onConnectionSettings = model::openSettings,
                 busy = state.busy, error = state.error, onRetry = model::retry)
         }
     }

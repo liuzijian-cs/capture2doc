@@ -12,11 +12,13 @@ import kotlinx.coroutines.SupervisorJob
 
 class Capture2DocApplication : Application() {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    internal val documentService by lazy { HttpDocumentService() }
+    internal val connectionSettings by lazy { io.github.liuzijiancs.capture2doc.data.settings.ConnectionSettings(filesDir) }
+    internal val documentService by lazy { HttpDocumentService(connectionSettings::token) }
     internal val taskRepository by lazy {
         TaskRepository(filesDir, applicationScope) { TaskSyncWorker.enqueue(this, it) }
     }
-    internal val taskSynchronizer by lazy { TaskSynchronizer(taskRepository, documentService) }
+    internal val documentContents by lazy { io.github.liuzijiancs.capture2doc.data.document.DocumentContentRepository(filesDir, taskRepository) }
+    internal val taskSynchronizer by lazy { TaskSynchronizer(taskRepository, documentService, documentContents) }
     internal val scanDraftRepository: ScanDraftRepository by lazy {
         ScanDraftRepository(filesDir)
     }

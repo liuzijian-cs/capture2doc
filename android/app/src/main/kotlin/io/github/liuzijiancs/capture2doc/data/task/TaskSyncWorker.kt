@@ -15,6 +15,8 @@ import io.github.liuzijiancs.capture2doc.Capture2DocApplication
 import io.github.liuzijiancs.capture2doc.core.model.DocumentPhase
 import io.github.liuzijiancs.capture2doc.core.model.PageRemotePhase
 import io.github.liuzijiancs.capture2doc.core.model.ScanPageState
+import io.github.liuzijiancs.capture2doc.data.document.DocumentContentRepository
+import io.github.liuzijiancs.capture2doc.data.document.terminal
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -29,13 +31,17 @@ internal enum class SyncOutcome { DONE, WAITING, RETRY, BLOCKED }
 internal class TaskSynchronizer(
     private val repository: TaskRepository,
     private val service: DocumentService,
+    private val contents: DocumentContentRepository? = null,
 ) {
     private val locks = ConcurrentHashMap<String, Mutex>()
 
     suspend fun sync(id: String): SyncOutcome = locks.getOrPut(id) { Mutex() }.withLock {
         repository.initialize()
         var task = repository.task(id)
+        task.documentId?.let { contents?.load(id, it) }
+        task = repository.task(id)
         if (task.baseUrl.isBlank()) return@withLock SyncOutcome.DONE
+        if (contents?.observe(id)?.value?.result != null) return@withLock SyncOutcome.DONE
         if (task.error != null && !task.retryable) return@withLock SyncOutcome.BLOCKED
         try {
             val draft = repository.openRepository(id)
@@ -66,15 +72,18 @@ internal class TaskSynchronizer(
                 repository.update(id) { it.copy(submissionAccepted = true) }
             }
             val status = service.status(task.baseUrl, documentId)
-            repository.update(id) { current -> current.copy(
-                phase = status.phase,
+            if (status.status == DocumentPhase.COMPLETED) {
+                status.validatedDocument()
+                contents?.storeResult(id, status)
+            }
+            repository.update(id) { current -> if (current.phase.terminal && !status.status.terminal) current else current.copy(
+                phase = status.status,
                 title = status.title?.takeIf(String::isNotBlank) ?: current.title,
                 wordCount = status.wordCount,
-                plainText = status.plainText,
-                pagePhases = status.pages,
-                error = status.message.takeIf { status.phase == DocumentPhase.FAILED }
-                    ?: if (status.phase == DocumentPhase.FAILED) "服务端处理失败" else null,
-                retryable = status.phase != DocumentPhase.FAILED,
+                pagePhases = emptyMap(),
+                error = status.message.takeIf { status.status == DocumentPhase.FAILED }
+                    ?: if (status.status == DocumentPhase.FAILED) "服务端处理失败" else null,
+                retryable = status.status != DocumentPhase.FAILED,
                 connectionIssue = null,
             ) }
             task = repository.task(id)
@@ -90,9 +99,11 @@ internal class TaskSynchronizer(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            if (contents?.observe(id)?.value?.result != null) return@withLock SyncOutcome.DONE
             val retryable = if (error is ServiceException) error.retryable else error is IOException
             repository.update(id) {
-                if (retryable) it.copy(connectionIssue = error.message ?: "未连接服务器", retryable = true)
+                if (contents?.observe(id)?.value?.result != null) it
+                else if (retryable) it.copy(connectionIssue = error.message ?: "未连接服务器", retryable = true)
                 else it.copy(error = error.message ?: "同步失败", retryable = false)
             }
             if (retryable) SyncOutcome.RETRY else SyncOutcome.BLOCKED
@@ -105,6 +116,7 @@ class TaskSyncWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val id = inputData.getString(TASK_ID) ?: return Result.failure()
         val app = applicationContext as Capture2DocApplication
         return try {
+            app.connectionSettings.initialize()
             when (app.taskSynchronizer.sync(id)) {
                 SyncOutcome.DONE -> Result.success()
                 SyncOutcome.WAITING -> {

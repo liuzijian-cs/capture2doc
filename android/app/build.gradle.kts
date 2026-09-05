@@ -44,9 +44,14 @@ android {
         compose = true
         buildConfig = true
     }
+    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
 }
 
 dependencies {
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
+    implementation(libs.androidx.webkit)
+    testImplementation(libs.okhttp.mockwebserver)
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

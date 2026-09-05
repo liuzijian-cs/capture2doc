@@ -66,6 +66,7 @@ internal fun HomeScreen(
     error: String? = null,
     onRetry: () -> Unit = onStartScan,
     disconnected: Boolean = false,
+    onConnectionSettings: () -> Unit = {},
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selectedIds by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
@@ -93,6 +94,7 @@ internal fun HomeScreen(
         }
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            TextButton(onClick = onConnectionSettings, enabled = !busy, modifier = Modifier.align(Alignment.End).testTag("home_connection_settings")) { Text("连接设置") }
             if (selection.isEmpty()) OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
                 placeholder = { Text("搜索文档标题") }, shape = RoundedCornerShape(28.dp),

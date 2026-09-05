@@ -6,7 +6,6 @@ import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
-import io.github.liuzijiancs.capture2doc.BuildConfig
 import io.github.liuzijiancs.capture2doc.Capture2DocApplication
 import io.github.liuzijiancs.capture2doc.data.task.TaskSyncWorker
 import kotlinx.coroutines.CancellationException
@@ -19,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-internal enum class TaskDestination { HOME, CAMERA, DETAIL }
+internal enum class TaskDestination { HOME, CAMERA, DETAIL, SETTINGS }
 internal data class TaskHomeState(
     val busy: Boolean = true,
     val error: String? = null,
@@ -31,6 +30,7 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
     private val app = application as Capture2DocApplication
     val repository = app.taskRepository
     val tasks = repository.tasks
+    val connection = app.connectionSettings.state
     private val connectivity = app.getSystemService(ConnectivityManager::class.java)
     // A network being available is not evidence that the document service responded.
     val networkAvailable = callbackFlow {
@@ -59,8 +59,11 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
         _state.update { it.copy(busy = false) }
         perform({ load() }) {
             repository.initialize()
+            try { app.connectionSettings.initialize() }
+            catch (_: Exception) { _state.update { it.copy(error = "连接配置无法解密，请重新保存连接设置") } }
             repository.tasks.value.forEach { task ->
                 try {
+                    task.documentId?.let { app.documentContents.load(task.taskId, it) }
                     repository.openRepository(task.taskId)
                     scheduleSync(task.taskId)
                 } catch (cancelled: CancellationException) { throw cancelled }
@@ -80,7 +83,7 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
         repository.initialize()
         val pendingId: String? = savedState["pendingCreateTaskId"]
         val pending = repository.tasks.value.firstOrNull { it.taskId == pendingId }
-            ?: repository.createLocalTask(BuildConfig.SERVICE_BASE_URL.trim().trimEnd('/'))
+            ?: repository.createLocalTask(connection.value.baseUrl)
         savedState["pendingCreateTaskId"] = pending.taskId
         repository.openRepository(pending.taskId)
         savedState.remove<String>("pendingCreateTaskId")
@@ -98,7 +101,7 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
 
     fun finishTask() {
         val id = _state.value.activeTaskId ?: return
-        perform({ finishTask() }) { repository.submit(id); navigate(TaskDestination.HOME) }
+        perform({ finishTask() }) { repository.submit(id); navigate(TaskDestination.DETAIL, id) }
     }
 
     fun hideTasks(ids: Set<String>): Unit = perform({ hideTasks(ids) }) {
@@ -107,6 +110,14 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
     }
 
     fun goHome() { if (!_state.value.busy) navigate(TaskDestination.HOME) }
+    fun openSettings() { navigate(TaskDestination.SETTINGS) }
+    fun settingsSaved(): Unit = perform({ settingsSaved() }) {
+        repository.tasks.value.filter { it.baseUrl.isBlank() || it.baseUrl == connection.value.baseUrl }.forEach { task ->
+            repository.update(task.taskId) { it.copy(error = null, connectionIssue = null, retryable = true) }
+            scheduleSync(task.taskId, replace = true)
+        }
+        navigate(TaskDestination.HOME)
+    }
 
     fun retryTask(id: String): Unit = perform({ retryTask(id) }) {
         repository.update(id) { it.copy(error = null, retryable = true) }
@@ -114,8 +125,9 @@ internal class TaskHomeViewModel(application: Application, private val savedStat
     }
 
     private suspend fun scheduleSync(id: String, replace: Boolean = false) {
-        repository.bindUnconfiguredService(id, BuildConfig.SERVICE_BASE_URL.trim().trimEnd('/'))
-        if (repository.task(id).baseUrl.isNotBlank()) TaskSyncWorker.enqueue(app, id, replace = replace)
+        repository.bindUnconfiguredService(id, connection.value.baseUrl)
+        val base = repository.task(id).baseUrl
+        if (base.isNotBlank() && app.connectionSettings.token(base).isNotBlank()) TaskSyncWorker.enqueue(app, id, replace = replace)
     }
 
     fun retry() { lastAction?.invoke() }
