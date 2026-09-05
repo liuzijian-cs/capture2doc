@@ -1,0 +1,281 @@
+{
+  "manifest_schema_version": 1,
+  "baseline_id": "pipeline-cli-v0.1.0",
+  "frozen_on": "2026-09-05",
+  "scope": "Local CLI V2, ordered images, sequential single-GPU inference; reviewed prototype, not production or Android HTTP acceptance",
+  "implementation_commit": "7c7fe7c4fa8b22d949694b37cf3d4040763d54f2",
+  "git_objects_at_implementation": {
+    "server/src": "6495d43ead0a14356bce8e11cc144c1c1eef93f8",
+    "server/scripts": "1f8fc03756a6f089f851a541d471275af5f0fcfe",
+    "server/tests": "bf35b9dccae9156eee83a683fe5daf49cb4bbca9",
+    "server/pyproject.toml": "5cb7cdd41c65c60f9abfddc7e828c85e0ffa95a4",
+    "server/uv.lock": "d9392cf147106e740c6d71c4c056439664f2868a"
+  },
+  "enforcement": "Audit manifest only; CLI does not load this file. Preserve the annotated baseline tag and use new output directories for experiments.",
+  "versions": {
+    "pipeline": 2,
+    "checkpoint_schema": 2,
+    "c2d_xml": "0.1",
+    "python_package": "0.1.0"
+  },
+  "entrypoint": "server/scripts/run_document.py",
+  "runtime_contract_from_r5_without_machine_paths": {
+    "pipeline_version": 2,
+    "overlap_generation": false,
+    "prompt_sha256": "36b373e3e3333bc6023f432ce004a3171d44c1e292d657aa8691ec2180732d86",
+    "model_configuration": {
+      "paddle": {
+        "settings": {
+          "model_id": "PaddlePaddle/PaddleOCR-VL-1.6",
+          "revision": "master",
+          "served_model_name": "PaddleOCR-VL-1.6",
+          "port": 8118,
+          "dtype": "bfloat16",
+          "max_pixels": 1003520,
+          "max_output_tokens": 4096,
+          "max_model_len": 8192,
+          "max_num_batched_tokens": 4096,
+          "max_num_seqs": 1,
+          "kv_cache_memory_bytes": 268435456,
+          "gpu_memory_utilization": null,
+          "startup_timeout_seconds": 600.0,
+          "shutdown_timeout_seconds": 30.0,
+          "quantization": null,
+          "reasoning_parser": null,
+          "enable_thinking_by_default": null,
+          "enable_chunked_prefill": false,
+          "trust_remote_code": true,
+          "enable_prefix_caching": false,
+          "mm_processor_cache_gb": 0,
+          "max_images_per_prompt": 1,
+          "prepare_script_name": "prepare_paddleocr_vl.py"
+        },
+        "snapshot_metadata_sha256": "5a1c5556927c79ed4cf81fe62ca01d73579a132a0f15406f02502f880f48956c"
+      },
+      "qwen": {
+        "settings": {
+          "model_id": "Qwen/Qwen3.5-9B",
+          "revision": "master",
+          "served_model_name": "Qwen3.5-9B",
+          "port": 8119,
+          "dtype": "bfloat16",
+          "max_pixels": 1310720,
+          "max_output_tokens": 8192,
+          "max_model_len": 16384,
+          "max_num_batched_tokens": 4096,
+          "max_num_seqs": 1,
+          "kv_cache_memory_bytes": 671088640,
+          "gpu_memory_utilization": null,
+          "startup_timeout_seconds": 900.0,
+          "shutdown_timeout_seconds": 30.0,
+          "quantization": "fp8_per_channel",
+          "reasoning_parser": "qwen3",
+          "enable_thinking_by_default": false,
+          "enable_chunked_prefill": true,
+          "trust_remote_code": false,
+          "enable_prefix_caching": false,
+          "mm_processor_cache_gb": 0,
+          "max_images_per_prompt": 1,
+          "prepare_script_name": "prepare_qwen35.py"
+        },
+        "snapshot_metadata_sha256": "0c146dc257723a8f8ae8b03c7c5c1d5466c90f06398132dc6a776c7e8ce9e356"
+      }
+    },
+    "max_repairs": 5,
+    "max_history_reads": 3,
+    "context_margin": 512,
+    "examples_sha256": "48a229aa0a3bfcff2a7ad2d4a0757880c85c7a49b98975a7e84e62e755d99fc2",
+    "response_protocol": "json-schema-v1",
+    "response_schema_sha256": "7f23e724e07ef2bd9284d818f6548663d99f7a2aa9cf7307071b8c1e3a97a992"
+  },
+  "runtime_notes": {
+    "default_host": "127.0.0.1",
+    "r5_host": "10.255.255.254",
+    "model_revision_warning": "master is mutable; recorded fingerprint covers snapshot metadata/configuration, not full model weight contents",
+    "temperature": 0,
+    "request_timeout_seconds": 1200,
+    "sdk_max_retries": 0,
+    "style_examples_experiment_enabled": false,
+    "overlap_generation_enabled": false,
+    "gpu_release_tolerance_mib": 128,
+    "allowed_output": "min(8192, 16384 - actual_prompt_tokens - 512)",
+    "minimum_allowed_output_tokens": 512,
+    "ocr_mapping": "VLM-proposed original line IDs; existence and exclusive ownership checked, semantic correspondence not independently verified",
+    "sampling_note": "Other sampling defaults follow the pinned inference implementation/runtime; temperature zero does not guarantee bitwise output reproduction",
+    "ocr_request_attempt_limit": 3,
+    "ocr_import_edge_cases": "Full Paddle configuration equality includes host/cache/snapshot paths. Import checks stop and raw response consistency, but does not recheck nonempty content before marking complete; all eight reused OCR results in R5 were nonempty."
+  },
+  "packaged_resources_sha256": {
+    "server/src/capture2doc/prompts/c2d_system.txt": "689c5aa43f63b35ff05340630ade382c5497fd04dffbd00c018f5736c3e9ce1d",
+    "server/src/capture2doc/prompts/c2d_blocks_v2.txt": "5c63a961f21ae3f104c57a83f7b470d0a214c06fd202b809dac00d20667e4b32",
+    "server/src/capture2doc/prompts/c2d_contract_v2.txt": "e0ea66340852107f8b3a6955f32108597b35036026557a0a89e635c05b61983f",
+    "server/src/capture2doc/prompts/c2d_style_examples_v2.json": "ee779a4d4e8d74802422db53fcac6ee3c15b8545f3fb251d5e0b1a1b52d36339",
+    "server/src/capture2doc/prompts/c2d_overlap_experiment_v2.txt": "7956348546ba8e199d8a8b8f3d0b0d2e6aa945e8c184aa83f576a207d1377a33",
+    "server/src/capture2doc/formats/c2d_xml/schemas/v0_1.xsd": "730dec91e3071b423f657632af0e0b17ffab4b47e0b00f1622afeca57aa43d4b",
+    "server/src/capture2doc/formats/c2d_xml/schemas/xml_lang.xsd": "2e265782d84eb857e110f977583731c93f228776ef228df99787b919999ae883"
+  },
+  "historical_validation": {
+    "implementation_commit": "7c7fe7c4fa8b22d949694b37cf3d4040763d54f2",
+    "python_tests_passed": 393,
+    "wheel_verification_report": "server/.cache/iterations/wheel-verification.json",
+    "wheel_verification_report_sha256": "5794e5864568564b637e78b06ec73c6f59dca2074fdd19558ed2c4b6b05ad9a7",
+    "wheel_sha256": "42c347cc65fef1768da710debdace05c5c3a33b3baa6dc650b0a7f15acdf3a15",
+    "wheel_resources_verified": 7,
+    "scope_note": "Recorded at R5; baseline documentation freeze does not rerun GPU tests"
+  },
+  "evaluation": {
+    "report": "docs/server_pipeline_evaluation_20260905.md",
+    "sample_count": 49,
+    "scope": "Five complete runs of the same eight ordered 800x600 static images, all reusing verified OCR; probes excluded. Scores are finite visual checks, not full-text accuracy.",
+    "rounds": [
+      {
+        "round": 1,
+        "commit": "7fef03cf7a0c086552554b9b54c743b6761640f9",
+        "root": "server/.cache/documents/image-test-group-1-iteration-1-20260905/result",
+        "processed_images": 8,
+        "status_counts": {
+          "ok": 63,
+          "fallback": 0,
+          "unresolved": 0
+        },
+        "natural_repair_calls": 0,
+        "seconds": 446.5185803489876,
+        "xml_valid": true,
+        "all_prompt_counts_match": true,
+        "cleanup_verified": true,
+        "visual_sample": {
+          "passed": 9,
+          "total": 49
+        },
+        "artifacts": {
+          "document.json": "d77a65d65ee5b83a77931c9cd47ca7086405fd75c5421655c3ce4b8c4607ea96",
+          "document.c2d.xml": "510f9eb3df43c96cdd42d113b91d6d1424d6ec5aef0a8ebb664b1023f11cd871",
+          "blocks.md": "5418dd299cfe45e829a0a7482586a66e8be14c9d2d0c67298c378191d316c6f2",
+          "summary.json": "df3e5fdcd7bf0a1290e88f2d3081c902e36a732daf5d01d636d6bb81871c52be"
+        },
+        "evaluation_report": "server/.cache/iterations/iteration-1-evaluation-all.json",
+        "evaluation_report_sha256": "932dea5b30d38dfbaedf6bb8f89fdad3b82dd07527913c33d63d0ce1abd3177c"
+      },
+      {
+        "round": 2,
+        "commit": "3c43c5a1bddde5b28712eea862facaf5da533439",
+        "root": "server/.cache/documents/image-test-group-1-iteration-2-20260905/result",
+        "processed_images": 8,
+        "status_counts": {
+          "ok": 58,
+          "fallback": 0,
+          "unresolved": 0
+        },
+        "natural_repair_calls": 0,
+        "seconds": 431.52545611100504,
+        "xml_valid": true,
+        "all_prompt_counts_match": true,
+        "cleanup_verified": true,
+        "visual_sample": {
+          "passed": 17,
+          "total": 49
+        },
+        "artifacts": {
+          "document.json": "58101b3c33d83ce42d782df257a1ac62d88e214b8191dc8fa824a19a9ed98019",
+          "document.c2d.xml": "4e1277d7f0123d2ff4a7bce30eb8347e0b1adf6757952a580978c47c37b715c3",
+          "blocks.md": "8517d137114556a5da16ea2e578f5ce89ce7c9a2815abb129074da6c890fad0a",
+          "summary.json": "8a2ac84afc53dd884a2c8b48026a77ae5039d5f42f7a08a55e7c682916ca9bbc"
+        },
+        "evaluation_report": "server/.cache/iterations/iteration-2-evaluation-all.json",
+        "evaluation_report_sha256": "2ea83495d3b308e6e8365f11317229ca16b102af03168fd8b2752019f6858ce8"
+      },
+      {
+        "round": 3,
+        "commit": "0e2ff16370728fbf2d175b3fc4bdc96eeeab079c",
+        "root": "server/.cache/documents/image-test-group-1-iteration-3-20260905/result",
+        "processed_images": 8,
+        "status_counts": {
+          "ok": 58,
+          "fallback": 0,
+          "unresolved": 0
+        },
+        "natural_repair_calls": 0,
+        "seconds": 473.03186575399013,
+        "xml_valid": true,
+        "all_prompt_counts_match": true,
+        "cleanup_verified": true,
+        "visual_sample": {
+          "passed": 15,
+          "total": 49
+        },
+        "artifacts": {
+          "document.json": "f3763b0f39552093306865168ebd48428614c9eb945826b73d8f8e08a234cf64",
+          "document.c2d.xml": "db6514d98c2396eab28ec0e4ee86a5683faf656b8bd8f0efb42f8330cc53da41",
+          "blocks.md": "0c0b8343a0bdcc3e68c1649a46cece67eb33d17f86fd2ff96f9795aa7fda4750",
+          "summary.json": "78be804483c58c26d5812d9867324e01f79a73005a21f5cea7d17303224c772a"
+        },
+        "evaluation_report": "server/.cache/iterations/iteration-3-evaluation-all.json",
+        "evaluation_report_sha256": "065d3491eb0a1e98e51010c1e28a8febcbc45beca2ff35941ee05a4597ebb02b"
+      },
+      {
+        "round": 4,
+        "commit": "820752cb4eb8973e5934df5755d2842ae795d2be",
+        "root": "server/.cache/documents/image-test-group-1-iteration-4-20260905/result",
+        "processed_images": 8,
+        "status_counts": {
+          "ok": 33,
+          "fallback": 4,
+          "unresolved": 0
+        },
+        "natural_repair_calls": 0,
+        "seconds": 1595.3688000899856,
+        "xml_valid": true,
+        "all_prompt_counts_match": true,
+        "cleanup_verified": true,
+        "visual_sample": {
+          "passed": 12,
+          "total": 49
+        },
+        "artifacts": {
+          "document.json": "10423f2981f17c926ed46bf2c848d4122ba55b9094fc541dab35956df6bc70ac",
+          "document.c2d.xml": "07b80a44e974d3427cbc344bfd88debcb9801dd5e5c7e5b9a22b9fdea26d70a5",
+          "blocks.md": "203ce047ed5093a779aa39d2eb792e7dea3e1804741d27296d413e3fc0b9b8a6",
+          "summary.json": "f82aecb4267a5a19146c8cf2f182d607d4ac8d46f3a5cdccbd71292c15ff4004"
+        },
+        "evaluation_report": "server/.cache/iterations/iteration-4-evaluation-all.json",
+        "evaluation_report_sha256": "b56a1794ab412b639ab4f0deea680b9fa6f090f4f7990612b12ed63c1a75a978"
+      },
+      {
+        "round": 5,
+        "commit": "7c7fe7c4fa8b22d949694b37cf3d4040763d54f2",
+        "root": "server/.cache/documents/image-test-group-1-iteration-5-20260905/result",
+        "processed_images": 8,
+        "status_counts": {
+          "ok": 56,
+          "fallback": 1,
+          "unresolved": 0
+        },
+        "natural_repair_calls": 5,
+        "seconds": 687.5606178430025,
+        "xml_valid": true,
+        "all_prompt_counts_match": true,
+        "cleanup_verified": true,
+        "visual_sample": {
+          "passed": 21,
+          "total": 49
+        },
+        "artifacts": {
+          "document.json": "635955149fe2bbb41622bec69da4aa105343d269f8691b292c80b27efa40f9d0",
+          "document.c2d.xml": "6ab4a8127434f5d39fd8cfd4f7a48eb6d9732eb0ade11a0b46f37758f63f0090",
+          "blocks.md": "a90b6ab07f03446389451f6d320d9e0d79be75d8c89860c1bc3a2172fe91f8d2",
+          "summary.json": "04e0f0c1abc1aabe42080d56b3616871bfb60645c9267e1249b03b29fd6c7efc"
+        },
+        "evaluation_report": "server/.cache/iterations/iteration-5-evaluation-all.json",
+        "evaluation_report_sha256": "c1eeb0f5fa7d51820c46d4798b9e1c42bda32ad570470c9d313463093cf64270"
+      }
+    ]
+  },
+  "delivery": {
+    "latest_result_dir": "server/.cache/documents/image-test-group-1-iteration-5-20260905/result",
+    "archive": "server/.cache/deliveries/image-test-group-1-five-rounds-20260905.zip",
+    "archive_sha256": "affe84a24df9eeb5b4ae08d6caccff9b2e3ba1609003b3edbbd6486b83c87b43",
+    "completed_resume_report": "server/.cache/documents/image-test-group-1-iteration-5-20260905/completed-resume.json",
+    "completed_resume_report_sha256": "9ddebf7c6522e30f92ff66cd7998b3aefc5f22c786348f49a8780be154205b19",
+    "availability": "Evidence, photos and checkpoints are ignored local/WSL artifacts, not included in a fresh Git clone; archive is a delivery of results, not a full resumable checkpoint"
+  }
+}

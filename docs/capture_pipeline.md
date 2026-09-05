@@ -14,7 +14,7 @@
 
 本次真机通过记录来自用户部署后反馈“可以测试通过”，按当前离线拍摄版本的人工冒烟验收记录；不代表 connectedDebugAndroidTest、长时间后台/进程恢复专项或服务端 OCR/VLM 链路通过。详细证据范围见 [本轮任务首页回归](android_camera_testing.md#本轮任务首页回归)。
 
-服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。
+服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。现已完成五轮有序八图实测，并冻结 [CLI 首版基线](server_pipeline_baseline_v0_1.md)：第五轮 57 块中 56 ok、1 局部 OCR 兜底，仍有内容和样式质量欠账。完成恢复与旧 V1 SIGTERM 测试分别记录，不能等同于 Android HTTP 联通。操作见 [服务端 Pipeline](server_pipeline.md)，证据见 [五轮报告](server_pipeline_evaluation_20260905.md)。
 
 服务端实体仅 document_id、不可变 image_id 和 ordered_image_ids。Android 本轮移除重拍后每张新照片有独立 pageId，拟在 HTTP 边界映射为 image_id；pageIds 映射最终 ordered_image_ids。同 ID 不同摘要拒绝，不增加逻辑页面修订。CLI 从输入清单导入并冻结列表，不是实时上传服务；HTTP 路由仍需统一评审。
 

@@ -12,7 +12,7 @@ Qwen3.5-9B 在 Capture2Doc 中用于关联页面解析结果、过滤无关内�
 C2D-XML。本阶段先把它作为独立的单图 VLM Worker 验证，不与 PaddleOCR-VL 同时
 常驻，也不把原始模型输出视为已经通过 C2D-XML 校验的文档。
 
-2026-09-05 流程边界补充：目标调度在服务端接受最终页面集合、顺序与不可变内容引用，且所需 OCR 结果齐备后才调用 Qwen。Android 可离线先拍摄和完成本地页序冻结；这不触发 Qwen，须待真实文档 ID、1280 派生图上传和会话提交完成。模型遵循用户确认页序恢复跨页结构，不按上传/OCR 回调顺序处理，也不自行重排采集页。服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。 独立 Worker 的参数实验与 CLI 验证分别记录，见 [扫描 Pipeline](capture_pipeline.md) 和 [XML 增量组装](c2d_xml_assembly.md)。
+2026-09-05 流程边界补充：目标调度在服务端接受最终页面集合、顺序与不可变内容引用，且所需 OCR 结果齐备后才调用 Qwen。Android 可离线先拍摄和完成本地页序冻结；这不触发 Qwen，须待真实文档 ID、1280 派生图上传和会话提交完成。模型遵循用户确认页序恢复跨页结构，不按上传/OCR 回调顺序处理，也不自行重排采集页。服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。现已完成五轮有序八图实测，并冻结 [CLI 首版基线](server_pipeline_baseline_v0_1.md)：第五轮 57 块中 56 ok、1 局部 OCR 兜底，仍有内容和样式质量欠账。完成恢复与旧 V1 SIGTERM 测试分别记录，不能等同于 Android HTTP 联通。操作见 [服务端 Pipeline](server_pipeline.md)，证据见 [五轮报告](server_pipeline_evaluation_20260905.md)。 独立 Worker 的参数实验与 CLI 验证分别记录，见 [扫描 Pipeline](capture_pipeline.md) 和 [XML 增量组装](c2d_xml_assembly.md)。
 
 ## 当前配置
 
@@ -108,7 +108,7 @@ processor 渲染真实模板；若完整 prompt 超过 `16384 - 8192 = 8192` tok
 Qwen3.5-9B 有 8 个 full-attention 层。仅按 BF16 K/V 粗略估计，完整 16K 序列约需
 512 MiB KV cache；混合 DeltaNet 状态、block 对齐和实现开销仍需余量，因此首轮固定
 1 GiB。实测 640 MiB 可为 16K 单序列提供 17788 tokens 的 KV 容量，并已经完成
-`5376 prompt + 8192 output` 强制长输出测试，当前作为 CLI 生产推荐覆盖值；512 MiB
+`5376 prompt + 8192 output` 强制长输出测试，当前作为 CLI 基线覆盖值；512 MiB
 只有 14108 tokens，无法覆盖 16K。该配置只约束 cache，不代表整个 Worker 的显存
 上限。
 
@@ -151,4 +151,4 @@ uv run --extra cuda python scripts/smoke_qwen35.py \
 - 真实约 4K OCR 文本到 C2D-XML 的内容质量、Schema 合法率和实际输出长度；
 - PaddleOCR-VL 与 Qwen 重复加载、推理和卸载时的资源清理与 semaphore warning；
 - 8192 输出上限是否满足真实 C2D-XML 样本；
-- 单图通过后，多图输入及 PaddleOCR-VL 与 Qwen 的顺序/同时常驻策略。
+- 扩大有序多图质量样本；单请求、先 OCR 后 Qwen 的顺序加载已在 CLI 基线运行，同时常驻不在该基线内。

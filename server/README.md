@@ -6,6 +6,8 @@ vLLM 只加载本地快照。本地 CLI V2 将 Paddle OCR、Qwen 多 block 草�
 主要输出文档 JSON 和完整逐块报告；每块最多五轮修复，耗尽后局部兜底并继续后续图片。支持不可变输入和检查点恢复，真实模型结果与质量限制见运行文档。
 暂不包含完整 PaddleOCR 页面 pipeline、HTTP 业务 API、Android 上传或通用 Agent 服务。
 
+当前冻结版本为 [pipeline-cli-v0.1.0](../docs/server_pipeline_baseline_v0_1.md)。整体流程、已知限制和下一步讨论依据集中在基线文档；配置与资源摘要见 [基线清单](baselines/pipeline_cli_v0_1.json)，真实质量证据见 [五轮报告](../docs/server_pipeline_evaluation_20260905.md)。
+
 ## 文档转换 CLI
 
 以 `document_id` 组织图片，使用不可变 `image_id` 和最终 `ordered_image_ids`，
@@ -21,7 +23,7 @@ uv run --extra cuda python scripts/run_document.py \
 该 CLI 保持单并发，Paddle 使用原默认配置，Qwen 显式采用 16K context、
 8K 最大输出、640 MiB KV cache 和关闭 thinking。完整 system prompt 以
 `src/capture2doc/prompts/c2d_blocks_v2.txt` 与 `c2d_contract_v2.txt` 管理，
-随包发布并记录运行哈希；旧 `c2d_system.txt` 仅用于 V1 恢复。
+随包发布并记录运行哈希；旧 `c2d_system.txt` 仅用于 V1 恢复。扩展样式和重叠生成实验默认关闭，基础结构/样式规则仍提供。独立 Qwen Worker 的默认 1 GiB KV 不代表本 CLI 的 640 MiB 配置。
 
 ## 环境准备
 

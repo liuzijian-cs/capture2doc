@@ -8,7 +8,9 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 
 ## 文档索引
 
-- [手机图片到 C2D-XML：本地 CLI](server_pipeline.md)：V2 文档 JSON、五轮分块修复、局部兜底、只读历史、单并发模型轮换与真实 GPU 验收。
+- [文档转换首版基线 v0.1.0](server_pipeline_baseline_v0_1.md)：当前冻结版本的整体流程、数据与上下文、来源关联边界、配置、恢复和下一步讨论依据。建议服务端从这里开始阅读。
+- [手机图片到 C2D-XML：本地 CLI](server_pipeline.md)：运行清单、命令、V2 文档 JSON、最多五次局部修复、兜底与恢复操作。
+- [五轮真实八图迭代报告](server_pipeline_evaluation_20260905.md)：五次完整实验的变更、效果、原始失败与评价限制；与单任务五次修复预算区分。
 
 - [Android 任务首页与采集任务](android_task_home.md)：本轮最新交互、实现状态及验证结果。
 - [Android / Server 文档任务协议 v1](android_task_protocol.md)：Android 发起的创建、JPEG 上传、最终页序与状态查询提案；服务端待接入。
@@ -23,7 +25,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 - [Android 相机拍摄与图像处理](android_camera_capture.md)：CameraX 配置、4:3 取景、对焦、方向、低延迟和 1280 像素选型。
 - [Android 相机测试与验收](android_camera_testing.md)：自动化覆盖、通用真机清单、性能指标和 OCR 输入对照。
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
-- [C2D-XML 增量组装](c2d_xml_assembly.md)：尾块替换、768/1536 token 上下文策略、离线导出命令、接口及验证结果。
+- [C2D-XML 增量组装](c2d_xml_assembly.md)：独立组装器及 V1 的尾块替换、768/1536 token 策略、离线导出与验证；V2 使用自己的实际请求预算。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 - [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。
 - [Qwen3.5-9B FP8 输入 Token 与独立 Worker](model_qwen_3_5_9b.md)：图像 token、chat template、16K/8K 预算、量化和显存验证方法。
@@ -36,7 +38,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 - 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页完成保存最终页序并直接回首页，未上传内容在后台继续，不代表文档已生成。
 - 后续处理方向：相机页直接管理候选，不强制经过独立整理页；允许未连接先拍摄并持续提示；关联真实文档 ID 且 1280 派生图就绪后逐页幂等上传，接收成功即排 OCR，最终输入冻结且所需结果齐备后才按确认页序组装。客户端协议适配已实现，服务端 API 与 OCR 队列尚未接入，鉴权、流式及端到端恢复详见 Pipeline 待决策表。
 - 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
-- 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。本地 CLI 已接入模型续写与恢复，常规 768/1536 token 策略之外允许真实预算内的完整大尾块；目标格式 Renderer 尚待接入。
+- 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。CLI V2 采用独立 block 草稿及实际 16K 请求预算，不沿用独立组装器的 768/1536 token 历史上限；目标格式 Renderer 尚待接入。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 
 服务端本地 CLI V2 已连接 Paddle → Qwen 多块草稿、完整提示词、真实 token 预算、五轮局部修复及 OCR/纯文本兜底；主要输出文档 JSON、XML 与完整逐块报告。检查点恢复保留预算，缺失块不阻止后续图片；真实模型验收单独记录，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。
