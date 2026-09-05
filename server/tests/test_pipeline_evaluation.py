@@ -78,6 +78,38 @@ def test_visual_checks_validate_ids_ranges_and_regex():
         )
 
 
+def test_text_color_checks_do_not_require_or_infer_hyperlinks():
+    blocks = [
+        {"image_id": "a", "xml": '<p><span text-color="blue">Ollama</span></p>'},
+        {"image_id": "a", "xml": '<p><a href="https://example.org">Ollama</a></p>'},
+        {"image_id": "a", "xml": '<p><span text-color="red">Ollama</span></p>'},
+    ]
+    checks = [
+        {
+            "id": "blue",
+            "kind": "text_color",
+            "color": "blue",
+            "pattern": "Ollama",
+            "expected": {"min": 1, "max": 1},
+        },
+        {
+            "id": "any-color",
+            "kind": "text_color",
+            "pattern": "Ollama",
+            "expected": {"min": 2, "max": 2},
+        },
+    ]
+    result = visual_checks(blocks, checks)
+    assert result["all_passed"]
+    assert result["checks"][0]["block_ids"] == [0]
+    assert result["checks"][1]["block_ids"] == [0, 2]
+    assert not visual_checks([blocks[1]], [checks[0]])["all_passed"]
+    with pytest.raises(ValueError, match="Invalid text color"):
+        visual_checks(
+            [], [{"id": "bad", "kind": "text_color", "color": "cyan", "pattern": "x"}]
+        )
+
+
 def test_diagnostics_do_not_conflate_invalid_xml_or_whitespace_differences():
     result = proposal_text_diagnostic(
         {"text": "中文\n代码", "xml": "<p>中文<br/>代码</p>"}

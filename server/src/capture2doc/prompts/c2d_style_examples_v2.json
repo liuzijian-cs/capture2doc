@@ -1,0 +1,37 @@
+[
+  {
+    "visual_fact": "单独占一段、作为下一节标题的文字。",
+    "xml": "<h2>使用说明</h2>",
+    "text": "使用说明"
+  },
+  {
+    "visual_fact": "同一正文段只有冒号前的引导词加粗，后文仍是同段正文。",
+    "xml": "<p><b>检查步骤：</b>连接电源后观察指示灯。</p>",
+    "text": "检查步骤：连接电源后观察指示灯。"
+  },
+  {
+    "visual_fact": "两个列表项均只有引导词加粗，不将整项加粗。",
+    "xml": "<ul><li><b>自动保存：</b>每次编辑后保存。</li><li><b>导出：</b>支持多种文件格式。</li></ul>",
+    "text": "自动保存：每次编辑后保存。\n导出：支持多种文件格式。"
+  },
+  {
+    "visual_fact": "蓝色文字显示完整网址，目标 URL 可直接从图中确认。",
+    "xml": "<p><a href=\"https://example.org/guide\"><span text-color=\"blue\">https://example.org/guide</span></a></p>",
+    "text": "https://example.org/guide"
+  },
+  {
+    "visual_fact": "正文显示蓝色的“操作手册”，但图片未显示目标 URL，也没有可靠目标来源。",
+    "xml": "<p><span text-color=\"blue\">操作手册</span></p>",
+    "text": "操作手册"
+  },
+  {
+    "visual_fact": "一段正文中仅“备份配置”有黄色局部底色且加粗。",
+    "xml": "<p>请先<b><span background-color=\"yellow\">备份配置</span></b>，再更新软件。</p>",
+    "text": "请先备份配置，再更新软件。"
+  },
+  {
+    "visual_fact": "整幅图片有穿过不相关文字和空白区域的彩色干涉条纹；正文没有可确认的局部样式。",
+    "xml": "<p>连接后等待指示灯稳定。</p>",
+    "text": "连接后等待指示灯稳定。"
+  }
+]

@@ -82,8 +82,16 @@ def visual_checks(blocks: list[dict], checks: list[dict]) -> dict:
             raise ValueError("Visual checks require unique nonempty string ids")
         seen.add(check_id)
         kind = check.get("kind", "content")
-        if kind not in {"content", "bold", "highlight", "link"}:
+        if kind not in {"content", "bold", "highlight", "link", "text_color"}:
             raise ValueError(f"Unknown visual check kind: {kind}")
+        color = check.get("color")
+        if (
+            kind == "text_color"
+            and color is not None
+            and color
+            not in {"red", "orange", "yellow", "green", "blue", "purple", "gray"}
+        ):
+            raise ValueError(f"Invalid text color for visual check {check_id}: {color}")
         pattern = re.compile(check["pattern"])
         expected = check.get("expected", {})
         lower, upper = expected.get("min", 1), expected.get("max")
@@ -123,6 +131,12 @@ def visual_checks(blocks: list[dict], checks: list[dict]) -> dict:
                         and node.get("background-color")
                     )
                     or (kind == "link" and tag == "a" and node.get("href"))
+                    or (
+                        kind == "text_color"
+                        and tag == "span"
+                        and node.get("text-color")
+                        and (color is None or node.get("text-color") == color)
+                    )
                 ):
                     selected.append(plain_text(node))
             if any(pattern.search(text) for text in selected):
