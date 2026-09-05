@@ -1,0 +1,21 @@
+[Unit]
+Description=Capture2Doc authenticated HTTP and SSE API
+After=network-online.target capture2doc-firewall.service
+Requires=capture2doc-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zane
+WorkingDirectory=/home/zane/workspace/project/capture2doc/server
+ExecStart=/home/zane/workspace/project/capture2doc/server/.venv/bin/capture2doc api --config /home/zane/.config/capture2doc/service.toml
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=false
+KillMode=control-group
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

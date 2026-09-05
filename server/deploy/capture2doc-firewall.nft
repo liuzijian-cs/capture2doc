@@ -1,0 +1,10 @@
+# Load as a dedicated table; never flush the machine's existing ruleset.
+# Includes loopback/local health checks, leaves SSH and unrelated services unchanged.
+table inet capture2doc {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        tcp dport 11209 iifname "lo" accept
+        ip saddr 100.64.250.2 tcp dport 11209 accept
+        tcp dport 11209 drop
+    }
+}

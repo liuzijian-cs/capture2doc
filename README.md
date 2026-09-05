@@ -21,9 +21,9 @@ C2D-XML 不包含原始分页、坐标、来源追溯、图片、画板、分栏
 
 上述完整处理方案仍是待验证的初始选型；仓库目前提供可运行的 Android 骨架、CameraX 4:3 拍照/1280 像素 OCR 派生图链路、本地多草稿任务首页、HTTP 客户端适配器，以及服务端文档转换 CLI，尚未形成端到端文档转换产品。这里的 1280 是派生图长边，不是 PaddleOCR 的 image-token 上限。
 
-2026-09-05 Android 已实现任务首页、多草稿、离线采集及最终页序保存，拍照页完成后直接回首页；移除重拍和独立整理网格。当前离线版本已获用户真机人工测试通过，设备自动化和跨端联调另行验收。HTTP 客户端和 WorkManager 已实现，服务端业务 API 尚未接入；当前交互与协议边界见 [文档索引](docs/README.md) 和 [任务首页](docs/android_task_home.md)。
+2026-09-05 Android 已实现任务首页、多草稿、离线采集及最终页序保存，拍照页完成后直接回首页；移除重拍和独立整理网格。当前离线版本已获用户真机人工测试通过，设备自动化和跨端联调另行验收。HTTP 客户端和 WorkManager 已实现，Android 尚未接入新服务端业务 API；当前交互与协议边界见 [文档索引](docs/README.md) 和 [任务首页](docs/android_task_home.md)。
 
-2026-09-05 [服务端文档转换 CLI V2](docs/server_pipeline.md) 以文档 JSON 为主要结果：Paddle OCR → Qwen 多 block 草稿 → 最多五轮局部修复 → OCR/纯文本兜底，保留缺失位置并继续后续图片。支持完整 XML 与逐块报告、单并发模型轮换、只读历史工具及检查点恢复。当前冻结为 [pipeline-cli-v0.1.0 首版基线](docs/server_pipeline_baseline_v0_1.md)，保持第五轮代码与默认配置。五轮真实八图结果、质量限制和后续方向均已归档；Android 上传和 HTTP 业务服务尚未接通。
+2026-09-05 [服务端文档转换 CLI V2](docs/server_pipeline.md) 以文档 JSON 为主要结果：Paddle OCR → Qwen 多 block 草稿 → 最多五轮局部修复 → OCR/纯文本兜底，保留缺失位置并继续后续图片。支持完整 XML 与逐块报告、单并发模型轮换、只读历史工具及检查点恢复。当前冻结为 [pipeline-cli-v0.1.0 首版基线](docs/server_pipeline_baseline_v0_1.md)，保持第五轮代码与默认配置。五轮真实八图结果、质量限制和后续方向均已归档；新增 [FastAPI 后端与 SSE 逐块预览](docs/server_service.md)，复用冻结 pipeline；Android SSE 消费及跨端联调留待下一轮。
 
 详细设计、实现状态和选型依据请参阅：
 

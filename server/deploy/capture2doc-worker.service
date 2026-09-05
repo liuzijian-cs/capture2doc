@@ -1,0 +1,20 @@
+[Unit]
+Description=Capture2Doc durable single-GPU worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zane
+WorkingDirectory=/home/zane/workspace/project/capture2doc/server
+ExecStart=/home/zane/workspace/project/capture2doc/server/.venv/bin/capture2doc worker --config /home/zane/.config/capture2doc/service.toml
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=false
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

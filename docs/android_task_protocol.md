@@ -1,6 +1,6 @@
 # Android / Server 文档任务协议 v1（客户端提案）
 
-日期：2026-09-05。状态：Android 侧定义的最小联调提案，服务端尚未实现或确认。HTTP 客户端按本提案实现不代表跨端验收通过。产品语义见 [任务首页](android_task_home.md)。
+日期：2026-09-05。状态：以下保留 Android 现有适配器的旧提案。后端首版已实现，最新接口以 [后端与 SSE 协议](server_service.md) 为准：GET 使用 status/c2dXml/sha256，needsReview 固定 false，OCR 等待终态，所有接口要求 Bearer token，新增 events。Android 尚待适配，旧 flag/plainText/pages 查询响应不代表服务端当前返回。HTTP 客户端按本提案实现不代表跨端验收通过。产品语义见 [任务首页](android_task_home.md)。
 
 ## 通用规则
 

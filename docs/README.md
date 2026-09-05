@@ -32,19 +32,22 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 - [Qwen3.5-9B FP8 输入 Token 与独立 Worker](model_qwen_3_5_9b.md)：图像 token、chat template、16K/8K 预算、量化和显存验证方法。
 - [Qwen3.5-9B FP8 参数实测与推荐](model_qwen_3_5_9b_parameters.md)：16GB NVIDIA 实测结果、显存对比和当前推荐参数。
 
+- [后端首版与 SSE 协议](server_service.md)：完整 GET、逐块可更新预览、鉴权、上传、独立 worker、持久化恢复及部署。
+- [后端验收记录](server_service_validation.md)：本地合约测试与公网真实模型验证，区分 Android 尚未联调范围。
+
 ## 当前决策
 
 - 系统边界：Android App 负责拍照/视频采集和页面预处理，本地服务端接收页面图片流并完成解析、组装和导出。
 - Android 当前阶段：CameraX、任务首页、多草稿隔离、稳定 viewport、候选管理、HTTP 适配器与 WorkManager 已实现。本轮四项本地回归、46 项 JVM 测试通过；2026-09-05 用户确认当前离线版本真机人工测试通过。新版设备自动化和服务端联调未执行。
 - 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页完成保存最终页序并直接回首页，未上传内容在后台继续，不代表文档已生成。
-- 后续处理方向：相机页直接管理候选，不强制经过独立整理页；允许未连接先拍摄并持续提示；关联真实文档 ID 且 1280 派生图就绪后逐页幂等上传，接收成功即排 OCR，最终输入冻结且所需结果齐备后才按确认页序组装。客户端协议适配已实现，服务端 API 与 OCR 队列尚未接入，鉴权、流式及端到端恢复详见 Pipeline 待决策表。
+- 后续处理方向：相机页直接管理候选，不强制经过独立整理页；允许未连接先拍摄并持续提示；关联真实文档 ID 且 1280 派生图就绪后逐页幂等上传，接收成功即排 OCR，最终输入冻结且所需结果齐备后才按确认页序组装。客户端协议适配已实现，后端 API、OCR 队列、鉴权和流式已实现，Android 仍待按新服务协议适配。
 - 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
 - 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。CLI V2 采用独立 block 草稿及实际 16K 请求预算，不沿用独立组装器的 768/1536 token 历史上限；目标格式 Renderer 尚待接入。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 
 服务端本地 CLI V2 已连接 Paddle → Qwen 多块草稿、完整提示词、真实 token 预算、五轮局部修复及 OCR/纯文本兜底；主要输出文档 JSON、XML 与完整逐块报告。检查点恢复保留预算，缺失块不阻止后续图片；真实模型验收单独记录，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。
 
-HTTP 客户端的 pageId/pageIds 拟映射服务端不可变 image_id/ordered_image_ids；本次移除重拍后每张新照片使用新 ID，不创建额外可修订页面实体。路径及字段仍需双方评审，见 [协议提案](android_task_protocol.md)。
+HTTP 客户端的 pageId/pageIds 拟映射服务端不可变 image_id/ordered_image_ids；本次移除重拍后每张新照片使用新 ID，不创建额外可修订页面实体。后端采用 /pages 和 pageIds；当前返回及 SSE 以 [服务协议](server_service.md) 为准，Android 旧提案仍待适配。
 
 ## 状态约定
 
