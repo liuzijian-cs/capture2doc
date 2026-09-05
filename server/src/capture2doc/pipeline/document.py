@@ -40,6 +40,7 @@ from .draft import (
     start_attempt,
 )
 from .models import verify_previous_cleanup
+from .protocol import response_schema
 from .runner import finish_reason
 from .store import DocumentStore, atomic_write, digest, now, write_json
 
@@ -329,6 +330,9 @@ def get_proposal(
     if attempt["proposal"] is not None:
         return attempt["proposal"]
     payload = request_context(store.state, draft, attempt)
+    schema = response_schema(
+        payload["mode"], attempt["attempt_id"], attempt["target_versions"]
+    )
     path = store.root / store.state["images"][draft["image_id"]]["model_path"]
     call_index = 0
     while call_index <= MAX_READS:
@@ -372,12 +376,15 @@ def get_proposal(
                     "payload": payload,
                     "inspection": inspection.to_dict(),
                     "max_output_tokens": output,
+                    "response_schema": schema,
                 },
             )
             store.save()
             started = time.monotonic()
             try:
-                result = models.generate(path, prompt, system, inspection, output)
+                result = models.generate(
+                    path, prompt, system, inspection, output, response_schema=schema
+                )
             except Exception as exc:
                 if not transient(exc):
                     raise
@@ -424,7 +431,9 @@ def get_proposal(
     raise AssertionError("unreachable")
 
 
-def initial_fallback(draft: dict, sources: list[dict], record: dict) -> None:
+def initial_fallback(
+    draft: dict, sources: list[dict], record: dict, *, ocr_complete: bool = True
+) -> None:
     b = candidate(
         {"xml": None, "text": None, "ocr_refs": [s["source_id"] for s in sources]},
         draft["image_id"],
@@ -432,6 +441,22 @@ def initial_fallback(draft: dict, sources: list[dict], record: dict) -> None:
     b["whole_image_fallback"] = True
     add_errors(b, [record])
     draft.update(blocks=[b], initialized=True, budgets={b["id"]: 0})
+    if sources and not ocr_complete:
+        missing = candidate(
+            {"xml": None, "text": None, "ocr_refs": []}, draft["image_id"]
+        )
+        add_errors(
+            missing,
+            [
+                error(
+                    "OCR_INCOMPLETE",
+                    "整图候选缺失且 OCR 不完整；已保留可用文字，未知剩余内容明确留空。",
+                    [missing["id"]],
+                )
+            ],
+        )
+        draft["blocks"].append(missing)
+        draft["budgets"][missing["id"]] = 0
 
 
 def run_batch(
@@ -462,7 +487,12 @@ def run_batch(
         except RejectedPatch as exc:
             record = error(str(exc).split(":")[0], str(exc))
             failed_attempt(draft, attempt, record)
-            initial_fallback(draft, state["images"][image_id]["sources"], record)
+            initial_fallback(
+                draft,
+                state["images"][image_id]["sources"],
+                record,
+                ocr_complete=state["images"][image_id]["ocr"].get("complete", False),
+            )
         check_combined(state["blocks"], draft)
         store.save()
     whole_image_failed = any(b.get("whole_image_fallback") for b in draft["blocks"])
@@ -683,6 +713,15 @@ def run_document_v2(
                 "max_history_reads": MAX_READS,
                 "context_margin": MARGIN,
                 "examples_sha256": digest(json_bytes(examples())),
+                "response_protocol": "json-schema-v1",
+                "response_schema_sha256": digest(
+                    json_bytes(
+                        [
+                            response_schema("generate", "attempt", {}),
+                            response_schema("repair", "attempt", {"target": 0}),
+                        ]
+                    )
+                ),
             }
         )
         atomic_write(directory / "system-prompt.txt", system.encode())

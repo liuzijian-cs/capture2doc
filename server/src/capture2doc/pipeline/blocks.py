@@ -172,6 +172,10 @@ def validate_block(block: dict) -> None:
         block["model_text"] = block["text"]
         block["text"] = plain_text(root[0])
     else:
+        if not isinstance(block["text"], str):
+            block["text"] = None
+        if not isinstance(block["xml"], str):
+            block["xml"] = None
         block["ocr_refs"] = (
             refs
             if isinstance(refs, list) and all(isinstance(r, str) for r in refs)
@@ -188,7 +192,7 @@ def plain_text(node: Any) -> str:
     for child in node:
         tag = etree.QName(child).localname
         result += "\n" if tag == "br" else plain_text(child)
-        if tag in {"p", "li", "tr"}:
+        if tag in {"p", "li", "tr", "thead", "tbody"}:
             result += "\n"
         elif tag in {"td", "th"}:
             result += "\t"

@@ -78,6 +78,7 @@ def analyze_image(
     request_timeout_seconds: float = 600.0,
     system_prompt: str | None = None,
     allow_empty: bool = False,
+    response_schema: dict[str, Any] | None = None,
 ) -> Qwen35Result:
     """Send one preflighted image-and-text request to the local Qwen worker."""
 
@@ -99,6 +100,12 @@ def analyze_image(
     }
     if ignore_eos:
         extra_body["ignore_eos"] = True
+    structured = {}
+    if response_schema is not None:
+        structured["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "c2d_action", "schema": response_schema},
+        }
     response = openai_client.chat.completions.create(
         model=settings.served_model_name,
         messages=image_messages(
@@ -107,6 +114,7 @@ def analyze_image(
         temperature=0,
         max_tokens=output_limit,
         extra_body=extra_body,
+        **structured,
     )
     message = response.choices[0].message
     content = message.content

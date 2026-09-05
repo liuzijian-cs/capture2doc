@@ -244,7 +244,14 @@ class LocalModels:
         )
 
     def generate(
-        self, path: Path, prompt: str, system: str, inspection: Any, output: int
+        self,
+        path: Path,
+        prompt: str,
+        system: str,
+        inspection: Any,
+        output: int,
+        *,
+        response_schema: dict[str, Any] | None = None,
     ) -> Any:
         with self._client("qwen") as client:
             return analyze_image(
@@ -257,4 +264,5 @@ class LocalModels:
                 request_timeout_seconds=1200,
                 client=client,
                 allow_empty=True,
+                response_schema=response_schema,
             )

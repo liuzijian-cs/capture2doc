@@ -182,6 +182,11 @@ def apply_patch(draft: dict, attempt: dict, proposal: dict) -> None:
     replacements = [
         candidate(v, draft["image_id"], lineage=attempt["lineage"]) for v in values
     ]
+    # A malformed repair must not destroy the independently saved text. Only
+    # reuse it for an unambiguous one-to-one replacement, never copy a whole
+    # ancestor into every child of a split.
+    if len(old) == len(replacements) == 1 and not replacements[0]["text"]:
+        replacements[0]["text"] = old[0]["text"]
     errors = [e for b in old for e in b["errors"]]
     guards = [e for b in old for e in b["guards"]]
     for index, b in enumerate(replacements):

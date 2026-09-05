@@ -56,7 +56,10 @@ class Models(FakeModels):
             prompt_tokens=tokens, to_dict=lambda: {"prompt_tokens": tokens}
         )
 
-    def generate(self, path, prompt, system, inspection, output):
+    def generate(
+        self, path, prompt, system, inspection, output, *, response_schema=None
+    ):
+        assert response_schema is not None
         payload = json.loads(prompt)
         self.requests.append(payload)
         self.events.append(f"qwen:{path.stem}")
@@ -571,3 +574,41 @@ def test_history_tool_budget_does_not_loop_forever(tmp_path):
     assert len(models.requests) == 5
     assert result(store)["blocks"][1]["fallback_source"] == "ocr"
     assert len(result(store)["blocks"]) == 2
+
+
+def test_bad_repair_field_types_remain_local_failures():
+    draft = new_draft("a", None)
+    initialize(draft, submit(block("可用", "<bad/>")))
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    proposal = {
+        "attempt_id": attempt["attempt_id"],
+        "target_versions": attempt["target_versions"],
+        "blocks": [{"xml": ["not XML"], "text": ["not a string"], "ocr_refs": None}],
+    }
+    apply_patch(draft, attempt, proposal)
+    assert draft["blocks"][0]["status"] == "pending"
+    fallback(draft["blocks"], [])
+    assert draft["blocks"][0]["status"] == "fallback"
+    assert draft["blocks"][0]["text"] == "可用"
+
+
+def test_plain_text_table_keeps_header_and_body_on_separate_lines():
+    value = candidate(
+        block(
+            "项目 值 A 1",
+            "<table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody><tr><td>A</td><td>1</td></tr></tbody></table>",
+        ),
+        "a",
+    )
+    assert value["text"] == "项目\t值\nA\t1"
+
+
+def test_truncated_ocr_whole_image_fallback_marks_unknown_remainder(tmp_path):
+    store = setup(tmp_path, {"a": "部分OCR"})
+    models = Models({"a": "部分OCR"}, actions=[response("bad JSON")])
+    models.ocr = lambda path: response("部分OCR", "length")
+    run(store, models)
+    doc = result(store)
+    assert [b["status"] for b in doc["blocks"]] == ["fallback", "unresolved"]
+    assert doc["blocks"][0]["text"] == "部分OCR"
+    assert doc["xml_status"] == "partial"

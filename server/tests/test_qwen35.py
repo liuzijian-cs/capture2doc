@@ -147,3 +147,34 @@ def test_system_message_is_shared_with_preflight_representation(tmp_path: Path) 
     assert sent[1]["content"][1] == inspected[1]["content"][1]
     assert sent[1]["content"][0]["type"] == "image_url"
     assert inspected[1]["content"][0]["type"] == "image"
+
+
+def test_json_schema_transport_keeps_existing_image_messages_and_budget(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "document.png"
+    path.write_bytes(b"image")
+    client, completions = make_client()
+    schema = {
+        "type": "object",
+        "properties": {"xml": {"type": "string"}},
+        "required": ["xml"],
+    }
+    analyze_image(
+        path,
+        "Convert",
+        Qwen35Settings(cache_dir=tmp_path),
+        prompt_tokens=1300,
+        client=client,
+        system_prompt="Full contract",
+        response_schema=schema,
+    )
+    request = completions.requests[0]
+    assert request["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "c2d_action", "schema": schema},
+    }
+    assert request["messages"][0]["content"] == "Full contract"
+    assert request["messages"][1]["content"][1]["text"] == "Convert"
+    assert request["max_tokens"] == 8192
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

@@ -96,7 +96,7 @@ XML 字符串使用 JSON 库无损序列化。兜底段落用 XML 库构建，�
 
 主上下文含完整 C2D 契约、已校验结构与样式 few-shot、完整当前图、OCR/来源片段、最近 1–3 个完整历史块及可选旧尾块。模型分别返回每块 `xml`、独立 `text` 和 `ocr_refs`。OCR 片段按原始换行分配 `image_id:ocr:行号` 及字符区间，仅定位来源，不决定 block 粒度。
 
-本轮实现应用层 JSON action 工具协议，复用已验证的 Qwen 普通 chat 模板，不引入原生 function-calling parser 或额外模型实例：
+本轮实现应用层 JSON action 工具协议，复用已验证的 Qwen 普通 chat 模板，不引入原生 function-calling parser 或额外模型实例。请求使用 `response_format=json_schema` 约束外层 action/blocks/字段类型，XML 字符串内部仍交给独立校验器及修复队列。接口依据 [vLLM Structured Outputs](https://docs.vllm.ai/en/stable/features/structured_outputs/)，检查点绑定 schema 哈希：
 
 - `submit`：主生成提交新增 blocks 及可选完整尾块；修复只能替换请求指定的目标组。
 - `read_blocks`：按历史显示编号读取最多 3 个完整已提交块。
