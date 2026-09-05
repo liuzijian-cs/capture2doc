@@ -225,3 +225,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Private service deployment and operator handoff
+server/deploy/generated/
+server/deploy/*.local.*
+service.local.toml
+*-token.json

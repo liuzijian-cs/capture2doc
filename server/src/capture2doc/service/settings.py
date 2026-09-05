@@ -9,10 +9,10 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     data_root: Path = Path.home() / ".local/share/capture2doc"
-    host: str = "100.64.250.1"
+    host: str = "127.0.0.1"
     port: int = 11209
-    trusted_proxy: str = "100.64.250.2"
-    model_host: str = "10.255.255.254"
+    trusted_proxy: str = "127.0.0.1"
+    model_host: str = "127.0.0.1"
     model_cache: Path = Path.home() / "models/modelscope"
     gpu_lock: Path = Path("/tmp/capture2doc-gpu.lock")
     max_upload_bytes: int = 10 * 1024**2

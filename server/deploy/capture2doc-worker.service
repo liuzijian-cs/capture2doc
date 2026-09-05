@@ -1,3 +1,4 @@
+# Template: render locally before installation.
 [Unit]
 Description=Capture2Doc durable single-GPU worker
 After=network-online.target
@@ -5,13 +6,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=zane
-WorkingDirectory=/home/zane/workspace/project/capture2doc/server
-ExecStart=/home/zane/workspace/project/capture2doc/server/.venv/bin/capture2doc worker --config /home/zane/.config/capture2doc/service.toml
+User=@SERVICE_USER@
+WorkingDirectory=@SERVER_DIR@
+ExecStart=@EXECUTABLE@ worker --config @CONFIG_FILE@
 Restart=on-failure
 RestartSec=10
 UMask=0077
-Environment="PATH=/home/zane/workspace/project/capture2doc/server/.venv/bin:/home/zane/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib"
+Environment="PATH=@BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib"
 NoNewPrivileges=true
 PrivateTmp=false
 KillMode=mixed

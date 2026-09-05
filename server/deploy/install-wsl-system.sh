@@ -5,10 +5,21 @@ if [ "$(id -u)" != 0 ]; then
     echo 'Run with sudo on WSL; no password belongs in repository/config.' >&2
     exit 1
 fi
+if [ "$#" != 3 ]; then
+    echo 'Usage: install-wsl-system.sh SERVICE_USER CHECKOUT PRIVATE_CONFIG' >&2
+    exit 1
+fi
+service_user=$1
+checkout_dir=$2
+private_config=$3
 deploy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-install -m 644 "$deploy_dir/capture2doc-api.service" /etc/systemd/system/
-install -m 644 "$deploy_dir/capture2doc-worker.service" /etc/systemd/system/
-install -m 644 "$deploy_dir/capture2doc-firewall.nft" /etc/capture2doc-firewall.nft
+render_dir=$(mktemp -d)
+trap 'rm -rf "$render_dir"' EXIT HUP INT TERM
+"$checkout_dir/server/.venv/bin/python" "$checkout_dir/server/scripts/render_service_deployment.py" \
+    --user "$service_user" --checkout "$checkout_dir" --config "$private_config" --output "$render_dir"
+install -m 644 "$render_dir/capture2doc-api.service" /etc/systemd/system/
+install -m 644 "$render_dir/capture2doc-worker.service" /etc/systemd/system/
+install -m 644 "$render_dir/capture2doc-firewall.nft" /etc/capture2doc-firewall.nft
 install -m 755 "$deploy_dir/load-firewall.sh" /usr/local/sbin/capture2doc-firewall
 cat > /etc/systemd/system/capture2doc-firewall.service <<'UNIT'
 [Unit]

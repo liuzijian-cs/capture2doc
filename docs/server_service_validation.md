@@ -1,6 +1,6 @@
 # 后端首版验收记录
 
-日期：2026-09-05。运行时提交 `8d944ac`，继承冻结 CLI 的模型参数、提示词和五次修复预算。公开入口 `https://c2d.liu.zj.cn`；Android 尚未适配本轮 Bearer、完整 GET 和 SSE，不能把模拟客户端验收当作 Android 真机联通。
+日期：2026-09-05。运行时提交 `8d944ac`，继承冻结 CLI 的模型参数、提示词和五次修复预算。公网 HTTPS 入口；Android 尚未适配本轮 Bearer、完整 GET 和 SSE，不能把模拟客户端验收当作 Android 真机联通。
 
 ## 自动化合约测试
 
@@ -20,11 +20,11 @@ macOS 完整回归 **415 passed**，其中新增服务测试 **22 项**。WSL �
 
 ## 部署与三图
 
-WSL 的 `capture2doc-api` 与 `capture2doc-worker` 均为 systemd 管理、`User=zane`。独立 nftables 表只允许本机和 `100.64.250.2` 访问 11209。volcano OpenResty 直连现有 SD-WAN，复用受管理的 `*.liu.zj.cn` 证书路径，不复制私钥；证书续期仍随原部署管理。未鉴权公网请求实测返回 401，SSE 单独关闭缓冲/缓存/压缩。
+WSL 的 `capture2doc-api` 与 `capture2doc-worker` 均为 systemd 管理、非 root 系统账号。独立 nftables 表只允许本机和 私密配置中的代理地址 访问 11209。公网 OpenResty 直连现有 SD-WAN，复用受管理的 部署域名对应的 证书路径，不复制私钥；证书续期仍随原部署管理。未鉴权公网请求实测返回 401，SSE 单独关闭缓冲/缓存/压缩。
 
-模拟客户端运行在 WSL，通过公网 HTTPS 域名访问 volcano 再回源 WSL；接收和事件时间使用同一主机时钟。以下投递延迟只证明这条公网测试链路，不代表 Android 移动网络的实测。
+模拟客户端运行在 WSL，通过公网 HTTPS 域名访问代理 再回源 WSL；接收和事件时间使用同一主机时钟。以下投递延迟只证明这条公网测试链路，不代表 Android 移动网络的实测。
 
-三图文档：`4e2d2ec3a0854e68877978fa62c5ffec`，顺序 image-1 → image-3。
+三图文档：`<DOCUMENT_ID>`，顺序 image-1 → image-3。
 
 | 指标 | 实测 |
 | --- | --- |
@@ -35,23 +35,23 @@ WSL 的 `capture2doc-api` 与 `capture2doc-worker` 均为 systemd 管理、`User
 | 主动重连 | 首个 patch 后断开并按 Last-Event-ID 续传 |
 | OCR / 修复 | 3 张 OCR 完整，三个图片批次修复调用均为 0 |
 | GPU 清理 | Qwen cleanup_verified=true，Paddle 已在切换前清理 |
-| 最终 SHA-256 | `a8802cfc311220911bb46aae87a068e68cbf2a9deb4e96865fef37c32151dee3` |
+| 最终 SHA-256 | 原始 XML UTF-8 字节的摘要与 GET 一致，实际值保存在私密验收产物中 |
 
-真实 Qwen 推理期间执行 API 重启：worker 的 MainPID 前后均为 `440022`，API 恢复后继续处理并完成三图。OpenResty 日志记录了旧 SSE 关闭与新 SSE 接续；重启不终止模型。
+真实 Qwen 推理期间执行 API 重启：worker 的 MainPID 前后保持一致，API 恢复后继续处理并完成三图。OpenResty 日志记录了旧 SSE 关闭与新 SSE 接续；重启不终止模型。
 
 三图产物在 WSL `server/.cache/service-acceptance-three-r2/`：`document.json`、`document.xml`、`preview.json`、`summary.json`。内部原始响应、草稿与逐块报告在数据根目录 `documents/<documentId>/pipeline/`。不把照片、正文或令牌提交到 Git。
 
 ## 本轮发现及修正
 
 1. **OpenResty 配置语法**：路由正则含 `{32}`，必须加引号。首次 `openresty -t` 拒绝加载，修正后校验并重载成功，未影响现有站点。
-2. **systemd 执行环境**：初版未显式设置虚拟环境 PATH，无法发现已安装的 `vllm`。首个文档 `9bc3ee486223418aa5013e7f47f135f2` 正确 FAILED，产物保留。worker unit 增加 PATH 后新三图完整运行。
+2. **systemd 执行环境**：初版未显式设置虚拟环境 PATH，无法发现已安装的 `vllm`。首个文档 `<DOCUMENT_ID>` 正确 FAILED，产物保留。worker unit 增加 PATH 后新三图完整运行。
 3. **验收客户端 XML 比较**：对有父节点的表格子树直接做 C14N，会产生命名空间上下文差异。确认原始表格节点一致、最终 XML 合法后，改为两侧独立解析再规范化，并加入表格回归。同一三图重新验收通过，没有重新调用模型或改写输出。
 4. **预览子集约束**：当旧尾块保留而相关候选暂不兼容时，候选延后显示，避免把过渡态误判为基础设施失败。正式文档损坏仍停止。
 5. **传输与恢复**：上传断流清理预留且不记录无意义堆栈；客户端重连退避处理 408/429/5xx，未知 API 故障统一安全 JSON。
 
 ## 八图与下一步
 
-文档 `7cd9acdc730d4679a0fe1c9b82eeec53`，顺序严格为 image-1 → image-8，**COMPLETED**。模型结果、检查点、SQLite 预览投影及公开 GET 一致；outbox 已清空，队列无待执行任务。最终复核时 API、worker、防火墙均 active，相关 Paddle/Qwen 清理记录全部通过，GPU 回落至 920 MiB（包含桌面等原有占用）。
+文档 `<DOCUMENT_ID>`，顺序严格为 image-1 → image-8，**COMPLETED**。模型结果、检查点、SQLite 预览投影及公开 GET 一致；outbox 已清空，队列无待执行任务。最终复核时 API、worker、防火墙均 active，相关 Paddle/Qwen 清理记录全部通过，GPU 回落至 920 MiB（包含桌面等原有占用）。
 
 | 指标 | 实测 |
 | --- | --- |
@@ -65,7 +65,7 @@ WSL 的 `capture2doc-api` 与 `capture2doc-worker` 均为 systemd 管理、`User
 | 最大投递延迟 | 1030.263 ms |
 | 超过 1 秒 | 2 个事件：ID 40 blocks.patch = 1030.263 ms；ID 41 document.progress = 1007.500 ms |
 | 断线续传 | 首个 patch 后主动断开一次，使用 Last-Event-ID 继续，最终节点一致 |
-| 最终 SHA-256 | `6ab4a8127434f5d39fd8cfd4f7a48eb6d9732eb0ade11a0b46f37758f63f0090` |
+| 最终 SHA-256 | 原始 XML UTF-8 字节的摘要与 GET 一致，实际值保存在私密验收产物中 |
 
 第 4 张的合格块在失败块修复完毕前已可见。五次修复耗尽后局部兜底并提交，继续处理第 5–8 张，未因单块失败停止整份文档。监控 SSH 曾意外断开；worker、API 与测试客户端进程均存活，游标继续推进，没有重新提交或重复生成文档。
 
@@ -82,3 +82,5 @@ WSL 的 `capture2doc-api` 与 `capture2doc-worker` 均为 systemd 管理、`User
 三图失败基线、修正后的三图以及原 CLI 八图迭代产物均保留。验收照片、正文和设备令牌未进入 Git。
 
 已经确认的下一轮依据：原始八图均为 800×600，但每张约 4.2–5.4 MiB，并同时存在动态照片元数据和附加 MP4 标志。前几张公网接收耗时约 28–47 秒。服务端本轮不修改上传原字节；Android 联调应确认实际上传的是规范化后的独立 JPEG 派生图，记录载荷字节数与上传耗时，避免只验证像素大小。之后再依据实测讨论 Paddle 空闲驻留时长，防止较慢上传造成不必要的反复加载；本轮没有为此改动冻结模型参数。
+
+本页为脱敏技术摘要；实际连接配置、文档身份、摘要值和完整原始证据只保存在机器本地，禁止复制到 Git 或 PR。

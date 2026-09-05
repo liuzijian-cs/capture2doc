@@ -3,8 +3,8 @@
 table inet capture2doc {
     chain input {
         type filter hook input priority -10; policy accept;
-        tcp dport 11209 iifname "lo" accept
-        ip saddr 100.64.250.2 tcp dport 11209 accept
-        tcp dport 11209 drop
+        tcp dport @PORT@ iifname "lo" accept
+        ip saddr @TRUSTED_PROXY@ tcp dport @PORT@ accept
+        tcp dport @PORT@ drop
     }
 }
