@@ -1,0 +1,7 @@
+<c2d-update xmlns="urn:capture2doc:c2d:1" schema-version="0.1">
+  <ul><li>段落</li><li>表格<ol><li>保留合并关系</li></ol></li></ul>
+  <table>
+    <thead><tr><th>项目</th><th>值</th></tr></thead>
+    <tbody><tr><td>A</td><td>1</td></tr></tbody>
+  </table>
+</c2d-update>

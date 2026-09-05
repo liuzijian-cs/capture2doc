@@ -1,0 +1,206 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:c="urn:capture2doc:c2d:1" targetNamespace="urn:capture2doc:c2d:1" elementFormDefault="qualified">
+  <xs:import namespace="http://www.w3.org/XML/1998/namespace" schemaLocation="xml_lang.xsd"/>
+  <xs:simpleType name="Color">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="red"/>
+      <xs:enumeration value="orange"/>
+      <xs:enumeration value="yellow"/>
+      <xs:enumeration value="green"/>
+      <xs:enumeration value="blue"/>
+      <xs:enumeration value="purple"/>
+      <xs:enumeration value="gray"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="Empty"/>
+  <xs:complexType name="aType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:b"/>
+      <xs:element ref="c:em"/>
+      <xs:element ref="c:del"/>
+      <xs:element ref="c:u"/>
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+    </xs:choice>
+    <xs:attribute name="href" type="xs:anyURI" use="required"/>
+  </xs:complexType>
+  <xs:element name="a" type="c:aType"/>
+  <xs:complexType name="bType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:em"/>
+      <xs:element ref="c:del"/>
+      <xs:element ref="c:u"/>
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="b" type="c:bType"/>
+  <xs:complexType name="emType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:del"/>
+      <xs:element ref="c:u"/>
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="em" type="c:emType"/>
+  <xs:complexType name="delType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:u"/>
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="del" type="c:delType"/>
+  <xs:complexType name="uType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="u" type="c:uType"/>
+  <xs:complexType name="codeType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="c:span"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="code" type="c:codeType"/>
+  <xs:complexType name="spanType" mixed="true">
+    <xs:attribute name="text-color" type="c:Color"/>
+    <xs:attribute name="background-color" type="c:Color"/>
+  </xs:complexType>
+  <xs:element name="span" type="c:spanType"/>
+  <xs:element name="br" type="c:Empty"/>
+  <xs:element name="latex" type="xs:string"/>
+  <xs:group name="Inline">
+    <xs:choice>
+      <xs:element ref="c:a"/>
+      <xs:element ref="c:b"/>
+      <xs:element ref="c:em"/>
+      <xs:element ref="c:del"/>
+      <xs:element ref="c:u"/>
+      <xs:element ref="c:code"/>
+      <xs:element ref="c:span"/>
+      <xs:element ref="c:br"/>
+      <xs:element ref="c:latex"/>
+    </xs:choice>
+  </xs:group>
+  <xs:complexType name="RichText" mixed="true">
+    <xs:group ref="c:Inline" minOccurs="0" maxOccurs="unbounded"/>
+  </xs:complexType>
+  <xs:element name="title" type="c:RichText"/>
+  <xs:element name="p" type="c:RichText"/>
+  <xs:element name="h1" type="c:RichText"/>
+  <xs:element name="h2" type="c:RichText"/>
+  <xs:element name="h3" type="c:RichText"/>
+  <xs:element name="h4" type="c:RichText"/>
+  <xs:element name="h5" type="c:RichText"/>
+  <xs:element name="h6" type="c:RichText"/>
+  <xs:element name="hr" type="c:Empty"/>
+  <xs:element name="pre">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="code" type="xs:string"/>
+      </xs:sequence>
+      <xs:attribute name="lang" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="List">
+    <xs:sequence>
+      <xs:element name="li" maxOccurs="unbounded">
+        <xs:complexType mixed="true">
+          <xs:choice minOccurs="0" maxOccurs="unbounded">
+            <xs:group ref="c:Inline"/>
+            <xs:element ref="c:ul"/>
+            <xs:element ref="c:ol"/>
+          </xs:choice>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="ul" type="c:List"/>
+  <xs:element name="ol" type="c:List"/>
+  <xs:element name="blockquote">
+    <xs:complexType>
+      <xs:choice maxOccurs="unbounded">
+        <xs:element ref="c:p"/>
+        <xs:element ref="c:ul"/>
+        <xs:element ref="c:ol"/>
+        <xs:element ref="c:blockquote"/>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="Cell" mixed="true">
+    <xs:group ref="c:Inline" minOccurs="0" maxOccurs="unbounded"/>
+    <xs:attribute name="rowspan" type="xs:positiveInteger"/>
+    <xs:attribute name="colspan" type="xs:positiveInteger"/>
+  </xs:complexType>
+  <xs:element name="table">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="thead" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="tr" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="th" type="c:Cell" minOccurs="0" maxOccurs="unbounded"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="tbody" minOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="tr" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="td" type="c:Cell" minOccurs="0" maxOccurs="unbounded"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:group name="Blocks">
+    <xs:choice>
+      <xs:element ref="c:p"/>
+      <xs:element ref="c:h1"/>
+      <xs:element ref="c:h2"/>
+      <xs:element ref="c:h3"/>
+      <xs:element ref="c:h4"/>
+      <xs:element ref="c:h5"/>
+      <xs:element ref="c:h6"/>
+      <xs:element ref="c:ul"/>
+      <xs:element ref="c:ol"/>
+      <xs:element ref="c:blockquote"/>
+      <xs:element ref="c:table"/>
+      <xs:element ref="c:pre"/>
+      <xs:element ref="c:hr"/>
+    </xs:choice>
+  </xs:group>
+  <xs:element name="document">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="c:title" minOccurs="0"/>
+        <xs:group ref="c:Blocks" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="schema-version" type="xs:string" fixed="0.1" use="required"/>
+      <xs:attribute ref="xml:lang"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="c2d-update">
+    <xs:complexType>
+      <xs:choice maxOccurs="unbounded">
+        <xs:element ref="c:title"/>
+        <xs:group ref="c:Blocks"/>
+      </xs:choice>
+      <xs:attribute name="schema-version" type="xs:string" fixed="0.1" use="required"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

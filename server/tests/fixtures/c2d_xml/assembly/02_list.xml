@@ -1,0 +1,4 @@
+<c2d-update xmlns="urn:capture2doc:c2d:1" schema-version="0.1">
+  <p>模型结合图片与 OCR 结果恢复文档。</p>
+  <ul><li>段落</li></ul>
+</c2d-update>
