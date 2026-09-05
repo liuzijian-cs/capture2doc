@@ -8,6 +8,7 @@ from typing import Any
 
 from capture2doc.config import Qwen35Settings
 from capture2doc.inference.image_input import image_data_url
+from capture2doc.inference.messages import image_messages
 
 DEFAULT_DOCUMENT_PROMPT = (
     "请阅读这张文档图片，按原有阅读顺序转写清晰可见的内容，"
@@ -75,6 +76,8 @@ def analyze_image(
     max_tokens: int | None = None,
     ignore_eos: bool = False,
     request_timeout_seconds: float = 600.0,
+    system_prompt: str | None = None,
+    allow_empty: bool = False,
 ) -> Qwen35Result:
     """Send one preflighted image-and-text request to the local Qwen worker."""
 
@@ -98,18 +101,9 @@ def analyze_image(
         extra_body["ignore_eos"] = True
     response = openai_client.chat.completions.create(
         model=settings.served_model_name,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": image_data_url(image_path)},
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
+        messages=image_messages(
+            prompt, system_prompt=system_prompt, image_url=image_data_url(image_path)
+        ),
         temperature=0,
         max_tokens=output_limit,
         extra_body=extra_body,
@@ -117,7 +111,9 @@ def analyze_image(
     message = response.choices[0].message
     content = message.content
     if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Qwen3.5 returned an empty response")
+        if not allow_empty:
+            raise RuntimeError("Qwen3.5 returned an empty response")
+        content = content if isinstance(content, str) else ""
 
     reasoning = getattr(message, "reasoning", None)
     if reasoning is None:

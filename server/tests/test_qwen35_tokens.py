@@ -85,3 +85,27 @@ def test_inspector_cross_checks_grid_and_placeholders(tmp_path: Path) -> None:
 def test_image_grid_must_align_with_merge_area() -> None:
     with pytest.raises(ValueError, match="not divisible"):
         calculate_image_tokens((1, 61, 81), spatial_merge_size=2)
+
+
+def test_inspector_renders_system_message_in_actual_template(tmp_path: Path) -> None:
+    image_path = tmp_path / "image.jpg"
+    image_path.write_bytes(b"image")
+    processor = FakeProcessor()
+    seen = []
+
+    def render(messages: object, **kwargs: object) -> str:
+        seen.append(messages)
+        return "system + image + OCR + complete tail"
+
+    processor.apply_chat_template = render
+    result = inspect_qwen35_tokens(
+        image_path,
+        "OCR and tail",
+        Qwen35Settings(cache_dir=tmp_path),
+        tmp_path,
+        system_prompt="C2D rules",
+        processor=processor,
+        image=FakeImage(),
+    )
+    assert seen[0][0] == {"role": "system", "content": "C2D rules"}
+    assert result.rendered_prompt == "system + image + OCR + complete tail"

@@ -63,6 +63,7 @@ class C2DAssembler:
         *,
         count_tokens: Callable[[str], int],
         token_budget: int = HISTORY_TOKEN_LIMIT,
+        allow_large_tail: bool = False,
     ) -> tuple[bytes, ...]:
         """Count exactly the newline-joined XML returned to the caller.
 
@@ -90,6 +91,10 @@ class C2DAssembler:
             return tokens
 
         tail_tokens = count(blocks[-1:])
+        # Pipeline callers can retain an oversized tail in full when the actual
+        # model budget permits it. The historical default remains unchanged.
+        if allow_large_tail and tail_tokens > HISTORY_TOKEN_LIMIT:
+            budget = token_budget
         if tail_tokens > budget:
             raise C2DAssemblyError(
                 (
