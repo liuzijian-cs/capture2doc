@@ -40,6 +40,7 @@ from .draft import (
     start_attempt,
 )
 from .models import verify_previous_cleanup
+from .overlap import bind_overlap, history_item, resolve_overlap, retrieve_history
 from .protocol import response_schema
 from .runner import finish_reason
 from .store import DocumentStore, atomic_write, digest, now, write_json
@@ -231,14 +232,18 @@ def run_ocr(store: BlockStore, models: Any, image_id: str) -> None:
 
 
 def history_view(block: dict, index: int) -> dict:
-    return {
+    result = {
         "block_id": index,
-        "internal_id": block["id"],
         "version": block["version"],
         "text": block["text"],
         "xml": block["xml"],
         "status": block["status"],
     }
+    try:
+        result["history_ref"] = history_item(block, index)["history_ref"]
+    except ValueError:
+        pass  # Fallback/unresolved history remains readable, but cannot authorize omission.
+    return result
 
 
 def history_tool(proposal: dict, blocks: list[dict]) -> dict:
@@ -295,7 +300,21 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
             for n in draft["blocks"][max(0, index - 1) : index + 2]:
                 if n["id"] not in attempt["targets"] and n not in neighbors:
                     neighbors.append(n)
-    return {
+    generating = attempt["kind"] == "generate"
+    tail = draft["old_tail"]
+    tail_index = len(committed) - 1 if tail else None
+    recent = [
+        history_view(committed[i], i)
+        for i in range(max(0, len(committed) - 3), len(committed))
+        if i != tail_index
+    ]
+    visible_indices = {item["block_id"] for item in recent}
+    if tail_index is not None:
+        visible_indices.add(tail_index)
+    retrieved = (
+        retrieve_history(committed, image["ocr"]["content"]) if generating else []
+    )
+    payload = {
         "mode": "generate" if attempt["kind"] == "generate" else "repair",
         "task_scope": (
             "整图视觉转录：检查全部文档区域，OCR只是参考。"
@@ -305,22 +324,46 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
         "image_id": draft["image_id"],
         "ocr_complete": image["ocr"].get("complete", False),
         "ocr_sources": image["sources"],
-        "mutable_tail": view(draft["old_tail"]) if draft["old_tail"] else None,
+        "mutable_tail": (history_view(tail, tail_index) if generating else view(tail))
+        if tail
+        else None,
         "document_has_title": any("<title" in (b["xml"] or "") for b in committed),
         "history_block_count": len(committed),
-        "readonly_history": [
-            history_view(committed[i], i)
-            for i in range(max(0, len(committed) - 3), len(committed))
+        "readonly_history": recent,
+        "retrieved_history": [
+            item for item in retrieved if item["block_id"] not in visible_indices
         ],
-        "targets": targets,
-        "neighbors": [view(b) for b in neighbors],
-        "attempt_id": attempt["attempt_id"],
-        "target_versions": attempt["target_versions"],
-        "allowed_modify_ids": attempt["targets"],
-        "repair_wave": draft["wave"],
         "complete_examples": examples(),
         "tool_results": [],
     }
+    if not generating:
+        payload.update(
+            targets=targets,
+            neighbors=[view(b) for b in neighbors],
+            attempt_id=attempt["attempt_id"],
+            target_versions=attempt["target_versions"],
+            allowed_modify_ids=attempt["targets"],
+            repair_wave=draft["wave"],
+        )
+    return payload
+
+
+def remember_sent_history(attempt: dict, payload: dict) -> None:
+    """Only dispatched context grants a reference, including dispatched tool replies."""
+    items = list(payload.get("readonly_history", [])) + list(
+        payload.get("retrieved_history", [])
+    )
+    if payload.get("mutable_tail"):
+        items.append(payload["mutable_tail"])
+    for result in payload.get("tool_results", []):
+        items.extend(result.get("result", {}).get("blocks", []))
+    known = {
+        item["history_ref"]: item for item in attempt.get("sent_overlap_history", [])
+    }
+    for item in items:
+        if isinstance(item.get("history_ref"), str):
+            known.setdefault(item["history_ref"], deepcopy(item))
+    attempt["sent_overlap_history"] = list(known.values())
 
 
 def get_proposal(
@@ -346,6 +389,11 @@ def get_proposal(
                 raise RejectedPatch(
                     "INTERRUPTED_REQUEST: 上次请求未留下完整响应；此次尝试已计入预算。"
                 )
+            request = json.loads(
+                read_artifact(store, call["request_ref"], call.get("request_sha256"))
+            )
+            payload = deepcopy(request["payload"])
+            remember_sent_history(attempt, payload)
             raw = json.loads(
                 read_artifact(store, call["response_ref"], call["response_sha256"])
             )
@@ -359,8 +407,14 @@ def get_proposal(
                 )
                 if output >= 512:
                     break
-                if len(payload["readonly_history"]) > 1:
+                if payload["retrieved_history"]:
+                    payload["retrieved_history"].pop(0)
+                    payload["history_context_trimmed"] = True
+                elif len(payload["readonly_history"]) > (
+                    0 if payload["mutable_tail"] else 1
+                ):
                     payload["readonly_history"].pop(0)
+                    payload["history_context_trimmed"] = True
                 else:
                     raise RejectedPatch(
                         "CONTEXT_BUDGET_EXCEEDED: 完整图片、规则、OCR、目标块及输出空间不能同时容纳；没有截断任何块。"
@@ -383,6 +437,8 @@ def get_proposal(
                     "response_schema": schema,
                 },
             )
+            call["request_sha256"] = digest(read_artifact(store, call["request_ref"]))
+            remember_sent_history(attempt, payload)
             store.save()
             started = time.monotonic()
             try:
@@ -485,7 +541,14 @@ def run_batch(
         )
         store.save()
         try:
-            initialize(draft, get_proposal(store, models, draft, attempt, system))
+            proposal = get_proposal(store, models, draft, attempt, system)
+            initialize(draft, proposal)
+            bind_overlap(
+                draft,
+                proposal.get("overlap_claim"),
+                attempt.get("sent_overlap_history", []),
+                committed=state["blocks"],
+            )
             attempt["status"] = "applied"
             draft["active_attempt"] = None
         except RejectedPatch as exc:
@@ -541,6 +604,7 @@ def run_batch(
         check_combined(state["blocks"], draft)
         store.save()
     resolve_fallback(draft, state["images"][image_id]["sources"], state["blocks"])
+    resolve_overlap(draft, state["blocks"])
     blocks = commit_blocks(state["blocks"], draft)
     document_xml(blocks, state["lang"])
     draft["committed"] = True
@@ -548,7 +612,8 @@ def run_batch(
     draft_data = json_bytes(draft)
     atomic_write(store.root / ref, draft_data)
     state["blocks"] = blocks
-    diag = diagnostic(state["images"][image_id]["ocr"]["content"], draft["blocks"])
+    observed = draft.get("omitted_blocks", []) + draft["blocks"]
+    diag = diagnostic(state["images"][image_id]["ocr"]["content"], observed)
     state["batches"].append(
         {
             "image_id": image_id,
@@ -557,7 +622,11 @@ def run_batch(
             "draft_sha256": digest(draft_data),
             "blocks_sha256": digest(json_bytes(blocks)),
             "diagnostic": diag,
-            "candidate_count": len(draft["blocks"]),
+            "candidate_count": len(observed),
+            "committed_candidate_count": len(draft["blocks"]),
+            "omitted_candidate_count": len(draft.get("omitted_blocks", [])),
+            "applied_overlap": deepcopy(draft.get("applied_overlap")),
+            "overlap_warnings": deepcopy(draft.get("overlap_warnings", [])),
             "repair_calls": sum(
                 len(a["calls"]) for a in draft["attempts"] if a["kind"] == "repair"
             ),
@@ -585,6 +654,19 @@ def projection(state: dict, completed: bool) -> dict:
         for batch in state["batches"]
         for key in ("ocr_coverage", "output_support")
     )
+    stitching = [
+        {
+            "image_id": batch["image_id"],
+            "applied_overlap": deepcopy(batch.get("applied_overlap")),
+            "warnings": deepcopy(batch.get("overlap_warnings", [])),
+        }
+        for batch in state["batches"]
+        if batch.get("applied_overlap") or batch.get("overlap_warnings")
+    ]
+    review |= any(
+        item["warnings"] or (item["applied_overlap"] or {}).get("needs_review", False)
+        for item in stitching
+    )
     xml_available = any(b["xml"] for b in blocks)
     return {
         "doc": {
@@ -596,6 +678,7 @@ def projection(state: dict, completed: bool) -> dict:
             if xml_available
             else "unavailable",
             "blocks": blocks,
+            "stitching": stitching,
         }
     }
 

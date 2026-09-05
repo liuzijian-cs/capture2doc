@@ -31,7 +31,7 @@ def test_packaged_style_examples_validate_and_match_their_independent_text():
 
 
 def test_prompt_contains_serialized_style_resource_and_complete_contract():
-    prompt = prompts.blocks_system_prompt()
+    prompt = prompts.blocks_system_prompt(include_style_examples=True)
     package = files(prompts.__package__)
     assert package.joinpath("c2d_contract_v2.txt").read_text(encoding="utf-8") in prompt
     serialized = json.dumps(
@@ -60,11 +60,18 @@ def test_style_resource_changes_are_covered_by_prompt_fingerprint(
     isolated_prompt_package,
 ):
     path = isolated_prompt_package / "c2d_style_examples_v2.json"
-    before = prompts.prompt_fingerprint(prompts.blocks_system_prompt())
+    before = prompts.prompt_fingerprint(
+        prompts.blocks_system_prompt(include_style_examples=True)
+    )
     examples = json.loads(path.read_text())
     examples[0]["visual_fact"] += "可见标题与后面的正文分段。"
     path.write_text(json.dumps(examples, ensure_ascii=False), encoding="utf-8")
-    assert prompts.prompt_fingerprint(prompts.blocks_system_prompt()) != before
+    assert (
+        prompts.prompt_fingerprint(
+            prompts.blocks_system_prompt(include_style_examples=True)
+        )
+        != before
+    )
 
 
 @pytest.mark.parametrize(
@@ -88,7 +95,7 @@ def test_invalid_style_resource_fails_before_prompt_is_used(
     change(examples)
     path.write_text(json.dumps(examples, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(RuntimeError, match="Invalid bundled style example 0"):
-        prompts.blocks_system_prompt()
+        prompts.blocks_system_prompt(include_style_examples=True)
 
 
 def test_corrupt_style_json_fails_with_resource_identity(isolated_prompt_package):
@@ -96,4 +103,18 @@ def test_corrupt_style_json_fails_with_resource_identity(isolated_prompt_package
         "[{", encoding="utf-8"
     )
     with pytest.raises(RuntimeError, match="c2d_style_examples_v2.json"):
-        prompts.blocks_system_prompt()
+        prompts.blocks_system_prompt(include_style_examples=True)
+
+
+def test_default_prompt_keeps_full_contract_without_experimental_style_expansion():
+    default = prompts.blocks_system_prompt()
+    extended = prompts.blocks_system_prompt(include_style_examples=True)
+    assert (
+        files(prompts.__package__)
+        .joinpath("c2d_contract_v2.txt")
+        .read_text(encoding="utf-8")
+        in default
+    )
+    assert "通用样式 few-shot" not in default
+    assert extended.startswith(default)
+    assert prompts.prompt_fingerprint(default) != prompts.prompt_fingerprint(extended)

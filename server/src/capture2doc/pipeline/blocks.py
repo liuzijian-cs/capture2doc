@@ -173,6 +173,13 @@ def validate_block(block: dict) -> None:
         block["representation_diagnostic"] = diagnostic
         if omission is not None:
             records.append(omission)
+        link_issues = empty_link_errors(block["id"], root[0])
+        records.extend(link_issues)
+        if link_issues and omission is None:
+            # This XML already passed the public schema. Its complete text must
+            # survive a link-only repair even if model_text was a short caption.
+            # The independently supplied text remains recorded in model_text.
+            block["text"] = xml_text
     if not records and root is not None:
         block["xml"] = etree.tostring(root[0], encoding="unicode", with_tail=False)
         block["status"] = "ok"
@@ -215,6 +222,45 @@ def plain_text(node: Any) -> str:
 def structural_text(text: str) -> str:
     """Ignore layout breaks, retaining ordinary spaces inside a line of text."""
     return re.sub(r"[ \t]*[\r\n]+[ \t]*", "", text).replace("\t", "")
+
+
+def empty_link_errors(block_id: str, node: Any) -> list[dict]:
+    """An empty target is a candidate error, without changing public URI rules."""
+    links = [
+        child
+        for child in node.iter(f"{{{NS}}}a")
+        if child.get("href") is not None and not child.get("href").strip()
+    ]
+    if not links:
+        return []
+    example = envelope(
+        '<p><span text-color="blue">操作手册</span></p>'
+        '<p><b><span background-color="yellow">备份配置</span></b></p>'
+    )
+    if not validate_update(example).valid:
+        raise RuntimeError("Invalid bundled empty-link repair example")
+    records = []
+    for link in links:
+        record = error(
+            "LINK_TARGET_EMPTY",
+            "a 的 href 为空或纯空白。只有已知的非空链接目标才能使用 a；"
+            "蓝字或底色不代表已知 URL，不能编造目标。",
+            [block_id],
+        )
+        record.update(
+            line=link.sourceline,
+            xpath=link.getroottree().getpath(link),
+            actual_structure=f"a href={link.get('href')!r}",
+            allowed_structure="已知非空目标使用 a href；目标未知时保留文字及有依据的 b/span，不输出 a。",
+            repair_instruction=(
+                "只移除目标未知的 a 外层，完整保留文字、粗体和有图像依据的 span；"
+                "保持文字色与背景色的区别及原强调范围，不因移除链接而删除样式。"
+                "只有可靠输入已给出目标时才填写非空 href，不猜测或编造 URL。"
+            ),
+            correct_example=example,
+        )
+        records.append(record)
+    return records
 
 
 def representation_check(

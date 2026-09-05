@@ -52,15 +52,20 @@ def style_examples() -> list[dict[str, str]]:
     return examples
 
 
-def blocks_system_prompt() -> str:
-    """Versioned task, full shared contract, and validated visual style examples."""
+def blocks_system_prompt(*, include_style_examples: bool = False) -> str:
+    """Full contract; extended style examples remain an explicit experiment.
+
+    The eight-image R3 evaluation regressed numerical transcription with the
+    extended examples. Keep the resource reusable without enabling it by default.
+    """
     instructions = [
         files(__package__).joinpath(name).read_text(encoding="utf-8")
         for name in ("c2d_blocks_v2.txt", "c2d_contract_v2.txt")
     ]
-    instructions.append(
-        "通用样式 few-shot：visual_fact 仅说明可见条件，不是输出字段。"
-        "学习局部样式范围与结构，不复制示例内容；每张实际图片仍使用完整块协议输出。\n"
-        + json.dumps(style_examples(), ensure_ascii=False, separators=(",", ":"))
-    )
+    if include_style_examples:
+        instructions.append(
+            "通用样式 few-shot：visual_fact 仅说明可见条件，不是输出字段。"
+            "学习局部样式范围与结构，不复制示例内容；每张实际图片仍使用完整块协议输出。\n"
+            + json.dumps(style_examples(), ensure_ascii=False, separators=(",", ":"))
+        )
     return "\n\n".join(instructions)

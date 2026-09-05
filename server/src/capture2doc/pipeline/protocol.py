@@ -26,6 +26,29 @@ def response_schema(mode: str, attempt_id: str, versions: dict) -> dict:
             {key: {"const": value} for key, value in versions.items()}
         )
     fields["blocks"] = {"type": "array", "items": block}
+    if mode == "generate":
+        # Complete observations precede the optional declaration of their prefix.
+        fields["overlap_claim"] = {
+            "anyOf": [
+                {"type": "null"},
+                object_schema(
+                    {
+                        "relation": {"const": "same_source_prefix_overlap"},
+                        "candidate_prefix_count": {"type": "integer", "minimum": 1},
+                        "history_refs": {
+                            "type": "array",
+                            "items": string,
+                            "minItems": 1,
+                            "maxItems": 64,
+                        },
+                        "first_history_match": {
+                            "enum": ["full_block", "suffix_of_first_history"]
+                        },
+                        "whole_image_has_no_new_content": {"type": "boolean"},
+                    }
+                ),
+            ]
+        }
     return {
         "anyOf": [
             object_schema(fields),
