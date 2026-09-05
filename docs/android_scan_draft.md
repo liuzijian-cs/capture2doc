@@ -35,6 +35,8 @@ DocumentTask 保存 taskId、服务端 documentId、首次绑定的非空服务�
 
 候选优先 postview、原图、派生图；恢复后没有 postview。照片以相同文件和 pageId 参与上传重试，不能把本地路径传给服务端，也不加入 C2D-XML。
 
+服务端 CLI 已使用 document_id、不可变 image_id 和 ordered_image_ids。Android 当前已移除重拍复用，pageId 可作为同一不可变图片身份的客户端值；HTTP 适配映射仍须评审，不因为历史重拍而重新引入服务器逻辑页或修订号。CLI 与 Android 的本地恢复分别实现，但网络联调尚未接通，见 [服务端 Pipeline](server_pipeline.md)。
+
 ## 后台同步与提交
 
 每个任务独立仓库和相机 ViewModel，切换任务不改变旧任务引用。后台观察本地页清单；无配置时只保存本地数据，不反复排空请求。配置服务后先以 taskId 幂等关联并持久化真实 documentId，派生图 READY 后才上传。确认后持久化 uploadedPageIds；网络失败保留图片。

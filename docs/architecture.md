@@ -5,7 +5,7 @@
 > 状态：设计与原型验证阶段  
 > 流程核对日期：2026-09-05；实现基线：`e55c8f8`
 
-本文描述目标架构，不表示所有组件均已实现。跨端触发条件、编辑与失败案例统一见 [扫描 Pipeline](capture_pipeline.md)；本轮实现和设计演变见 [开发成果与计划](android_progress_and_plan.md)。当前 Android 已实现任务首页、多草稿及 HTTP/WorkManager 客户端；服务端 Worker 与 XML 模块可独立运行，业务 API 与端到端链路尚未接通。
+本文描述目标架构，不表示所有组件均已实现。跨端触发条件、编辑与失败案例统一见 [扫描 Pipeline](capture_pipeline.md)；本轮实现和设计演变见 [开发成果与计划](android_progress_and_plan.md)。当前 Android 已实现任务首页、多草稿及 HTTP/WorkManager 客户端；服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。 业务 HTTP API 与 Android 端到端链路尚未接通。
 
 ## 目标
 
@@ -93,7 +93,7 @@ flowchart LR
 每轮响应使用内部 c2d-update 信封，独立校验完整子树；最终 document 再做整文档校验。
 当前已实现校验、尾块替换、768/1536 token 上下文选择及离线文件导出。
 上下文实际返回数量由尾块长度和调用方提供的剩余预算决定，详见
-[C2D-XML 增量组装](c2d_xml_assembly.md)。真实模型窗口调度和端到端采集流程尚未接入。
+[C2D-XML 增量组装](c2d_xml_assembly.md)。本地 CLI 已接入真实模型窗口调度、允许真实预算内完整大尾块及恢复；单图 GPU 和 SIGTERM 验证见服务端专题，Android 采集上传仍未接通。
 
 会话级 `finalize` 是未来业务协议；已有 `C2DAssembler.finalize()` 仅校验并序列化 XML，不冻结内存状态、不启动模型或写文件。页面上传的幂等语义也不适用于非幂等的 XML 更新应用。
 
@@ -136,7 +136,7 @@ POST /v1/documents/{documentId}/finalize
 GET  /v1/documents/{documentId}
 ```
 
-旧的 sessions/jobs 路由草案已被替代。客户端完成先冻结 pageIds 并回首页，等引用页上传确认后发 finalize；服务端接受后等有效 OCR 齐备。创建与 finalize 使用稳定幂等键，PUT 确认页面 ID 和摘要。GET 返回文档/逐页 flag，COMPLETED 返回最终标题、字数与只读 plainText。
+上游曾提出 /images/{image_id}、jobs 和 exports 路由草案；Android 本轮实现的是上列 /pages/{pageId} 与 GET 文档快照提案。两者没有已部署 HTTP 可供直接兼容，联调需统一路由与字段。服务端只保留 document_id / 不可变 image_id / ordered_image_ids，不建立逻辑 page_id 或同 ID 修订。客户端完成先冻结 pageIds 并回首页，等引用页上传确认后发 finalize；服务端接受后等有效 OCR 齐备。创建与 finalize 使用稳定幂等键，PUT 确认页面 ID 和摘要。GET 返回文档/逐页 flag，COMPLETED 返回最终标题、字数与只读 plainText。
 
 具体字段、错误和重试见协议专题；流式 block、鉴权及 Renderer 输出端点另行联调，不把旧示意 API 当作可调用接口。
 
@@ -152,7 +152,7 @@ OPEN → RECEIVING → FINALIZED → WAITING_FOR_PAGES → ASSEMBLING → VALIDA
 
 ### 目标服务端组件与现状
 
-以下是职责划分。当前仅有独立推理 Worker、模型运行工具、XML 校验和内存组装/离线导出；会话 API、业务队列、完整页面 pipeline、模型协同及 Renderer 尚未接入。
+以下是职责划分。当前已有独立 Worker、XML 校验/组装、双模型串行 CLI 与检查点恢复；HTTP、实时业务队列、完整 Paddle 页面 pipeline 和 Renderer 尚未接入。CLI 的单图 GPU 与 SIGTERM 验证不覆盖多文档网络调度。
 
 1. **Session API**：验证请求、鉴权、幂等、页序和会话状态。
 2. **Local Asset Store**：保存原始页面、处理后页面、模型中间结果和导出物。

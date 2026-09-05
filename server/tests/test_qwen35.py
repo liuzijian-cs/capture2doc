@@ -8,6 +8,7 @@ import pytest
 
 from capture2doc.config import Qwen35Settings
 from capture2doc.inference.qwen35 import analyze_image, validate_prompt_budget
+from capture2doc.inference.messages import image_messages
 
 
 class FakeCompletions:
@@ -51,9 +52,7 @@ def test_analyze_image_uses_fp8_worker_contract(tmp_path: Path) -> None:
     assert request["model"] == "Qwen3.5-9B"
     assert request["temperature"] == 0
     assert request["max_tokens"] == 8_192
-    assert request["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
     assert request["messages"][0]["content"][1]["text"] == "Read the document."
 
 
@@ -126,3 +125,25 @@ def test_request_timeout_must_be_positive(tmp_path: Path) -> None:
             request_timeout_seconds=0,
             client=client,
         )
+
+
+def test_system_message_is_shared_with_preflight_representation(tmp_path: Path) -> None:
+    path = tmp_path / "image.jpg"
+    path.write_bytes(b"image")
+    client, completions = make_client()
+    prompt = '文档里有 "quotes"、{变量} 和 <标签>。'
+    system = "完整 C2D 规则"
+    analyze_image(
+        path,
+        prompt,
+        Qwen35Settings(cache_dir=tmp_path),
+        prompt_tokens=500,
+        client=client,
+        system_prompt=system,
+    )
+    sent = completions.requests[0]["messages"]
+    inspected = image_messages(prompt, system_prompt=system)
+    assert sent[0] == inspected[0] == {"role": "system", "content": system}
+    assert sent[1]["content"][1] == inspected[1]["content"][1]
+    assert sent[1]["content"][0]["type"] == "image_url"
+    assert inspected[1]["content"][0]["type"] == "image"

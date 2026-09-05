@@ -8,6 +8,8 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 
 ## 文档索引
 
+- [手机图片到 C2D-XML：本地 CLI](server_pipeline.md)：双模型串行推理、动态尾块预算、故障恢复及 WSL 验证范围。
+
 - [Android 任务首页与采集任务](android_task_home.md)：本轮最新交互、实现状态及验证结果。
 - [Android / Server 文档任务协议 v1](android_task_protocol.md)：Android 发起的创建、JPEG 上传、最终页序与状态查询提案；服务端待接入。
 
@@ -34,8 +36,12 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 - 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页完成保存最终页序并直接回首页，未上传内容在后台继续，不代表文档已生成。
 - 后续处理方向：相机页直接管理候选，不强制经过独立整理页；允许未连接先拍摄并持续提示；关联真实文档 ID 且 1280 派生图就绪后逐页幂等上传，接收成功即排 OCR，最终输入冻结且所需结果齐备后才按确认页序组装。客户端协议适配已实现，服务端 API 与 OCR 队列尚未接入，鉴权、流式及端到端恢复详见 Pipeline 待决策表。
 - 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
-- 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。真实模型续写与目标格式 Renderer 尚待接入。
+- 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。本地 CLI 已接入模型续写与恢复，常规 768/1536 token 策略之外允许真实预算内的完整大尾块；目标格式 Renderer 尚待接入。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
+
+服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。
+
+HTTP 客户端的 pageId/pageIds 拟映射服务端不可变 image_id/ordered_image_ids；本次移除重拍后每张新照片使用新 ID，不创建额外可修订页面实体。路径及字段仍需双方评审，见 [协议提案](android_task_protocol.md)。
 
 ## 状态约定
 

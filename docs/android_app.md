@@ -18,6 +18,8 @@
 
 完整行为见 [任务首页](android_task_home.md)，跨端时序见 [Pipeline](capture_pipeline.md)，字段见 [客户端协议提案](android_task_protocol.md)。
 
+服务端 CLI 已使用 document_id、不可变 image_id 和 ordered_image_ids。Android 当前已移除重拍复用，pageId 可作为同一不可变图片身份的客户端值；HTTP 适配映射仍须评审，不因为历史重拍而重新引入服务器逻辑页或修订号。CLI 与 Android 的本地恢复分别实现，但网络联调尚未接通，见 [服务端 Pipeline](server_pipeline.md)。
+
 ## 模块职责
 
 - TaskHomeViewModel 管理首页导航、本地创建与后台关联、保存、提交及本机移除，SavedStateHandle 仅记录导航身份。

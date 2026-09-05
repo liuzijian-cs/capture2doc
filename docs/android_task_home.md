@@ -57,6 +57,8 @@
 
 WorkManager 正常等待另排延迟查询，不把等待 OCR 当网络错误无限增加退避；实际网络错误使用指数退避。旧有后继工作存在时不重复增加轮询链。每个任务的状态刷新和上传串行；任务隐藏不取消调度。平台仍可能延迟执行，不能把最低查询间隔当实时保证。
 
-本次验收状态同步仅修改 docs/ Markdown，直接修订已有专题正文，未修改 App 或服务端代码，也未重新执行构建、设备测试或模型实验。文档检查：19 份 Markdown、121 个本地链接/锚点与代码围栏检查通过；示意图结构已人工阅读，未运行 Mermaid 渲染器。git diff --check 通过，未提交 Git commit。
+此前验收状态同步仅修改 docs/ Markdown，直接修订已有专题正文，当时未重新执行构建、设备测试或模型实验；当时的 19 份 Markdown、121 个本地链接/锚点检查通过。这是提交前的历史步骤，不表示当前仍未提交。
 
-晚到上游更新：origin/main 新增 d881227 和 89cef78，当前工作区仍以 17f0897 为代码基线，未自动合并。远端已有可恢复 CLI 与其测试记录，但仍无业务 HTTP；这些提交同时修改本轮涉及的文档，整合时应保留双方最新结论。不可变 image_id 映射及 needs_review 边界已补入协议提案。
+提交整合：本轮 Android 实现及验收文档已保存为 `06b0db0`；随后合并远端 `d881227`、`89cef78`、`d0cb5c5` 的可恢复 CLI、WSL 验证及 Schema 修复说明。双方代码保留，冲突文档按最新离线流程与服务器不可变 image_id 合并；HTTP 路由与 needs_review UI 仍需联调。
+
+合并后复查：Android testDebugUnitTest、assembleDebug、lintDebug、assembleDebugAndroidTest 成功，未变化任务复用 UP-TO-DATE 结果，JVM 通过基线仍为 46 项；服务端非 GPU 测试实际执行 188 项通过。20 份 Markdown、134 个本地链接/锚点、围栏、冲突标记及 git diff --check 检查通过，未运行 Mermaid 渲染器。本次未执行 connectedDebugAndroidTest 或 GPU 实验，用户确认的真机人工通过记录保持原范围。

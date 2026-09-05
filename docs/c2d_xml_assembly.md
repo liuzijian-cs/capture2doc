@@ -8,7 +8,7 @@
 
 ## 在扫描 Pipeline 中的位置
 
-目标业务流程允许离线先拍摄，用户可在任何网络上传发生前完成本地最终页序冻结并回首页。后台关联真实文档 ID 后逐页上传 1280 派生图，接收即排 OCR，全部引用页上传确认后再发送会话级 finalize；只有最终输入被冻结且所需 OCR 结果齐备，未来调度层才按该顺序调用 VLM，并将响应交给本模块。OCR 回调乱序不能直接驱动 XML 追加，页面排序权也不属于本模块。完整流程见 [扫描 Pipeline](capture_pipeline.md)。
+目标业务流程允许离线先拍摄，用户可在任何网络上传发生前完成本地最终页序冻结并回首页。后台关联真实文档 ID 后逐页上传 1280 派生图，接收即排 OCR，全部引用页上传确认后再发送会话级 finalize；只有最终输入被冻结且所需 OCR 结果齐备，调度层才按该顺序调用 VLM（CLI 已实现串行调用，HTTP 调度未接入），并将响应交给本模块。OCR 回调乱序不能直接驱动 XML 追加，页面排序权也不属于本模块。完整流程见 [扫描 Pipeline](capture_pipeline.md)。
 
 本模块的 `finalize()` 与未来会话级 `finalize` 不同：前者校验并返回 XML 字节，后者确认并冻结采集输入。后者的 Android 请求适配器已实现，但服务端业务 HTTP 尚未接入；本模块不会因此获得页面上传、会话冻结或进程恢复能力。生成最终文件由离线导出脚本负责，生成 Lark/Markdown/思源内容则仍需未来 Renderer。
 
@@ -21,7 +21,7 @@
 |---|---|
 | `C2DAssembler(*, lang=None)` | 建立空 document，验证可选语言；非法参数抛 ValueError |
 | `apply_update(xml: str \| bytes) -> ValidationResult` | 逐轮替换尾块、追加，成功才提交状态 |
-| `context_blocks(*, count_tokens, token_budget=1536) -> tuple[bytes, ...]` | 返回阅读顺序下的完整历史 block |
+| `context_blocks(*, count_tokens, token_budget=1536, allow_large_tail=False) -> tuple[bytes, ...]` | 返回阅读顺序下的完整历史 block；CLI 可显式允许预算内的大尾块 |
 | `finalize() -> bytes` | 重新校验并序列化 UTF-8 XML；不写文件、不冻结状态 |
 
 `C2DAssemblyError` 继承 ValueError，携带 `issues` 元组。
@@ -42,14 +42,14 @@
 block_index 为 None。合并器复用现有校验器，不重复实现 XML 安全规则。
 
 调用必须串行、每轮仅应用一次。该协议不具备重试幂等性；重复应用带新增块的更新
-可能重复内容。未来调度层需负责轮次、版本检查与重试管理。
+可能重复内容。本地 CLI 已负责轮次、版本检查与有限重试；HTTP 接收层的幂等另行实现。
 只读前缀不会被程序修改，但模型把旧内容复制到新尾块的语义重复无法由语法校验发现。
 
 因此，未来页面上传的幂等重试不能直接复用于 XML 更新。会话重启、模型响应重放和跨进程组装恢复需要业务调度层管理轮次、有效版本与检查点；当前内存合并器和固定样例导出不构成这些能力的验证。
 
 ## 上下文 Token 策略
 
-历史硬上限为 **1,536 token**，长尾块阈值为 **768 token**：
+默认历史硬上限为 **1,536 token**，长尾块阈值为 **768 token**：
 
 1. 有效预算取 min(1536, token_budget)。预算必须是非负整数；空历史直接返回空元组。
 2. 先计数最后一个完整 block；超过预算时抛 CONTEXT_BUDGET_EXCEEDED，状态不变。
@@ -82,7 +82,9 @@ history_xml = b"\n".join(blocks).decode("utf-8")
 当前 16K 模型配置预留 8K 输出，因此全部输入最多 8K；历史上限不是整个 prompt
 上限。发送请求前仍须通过真实 processor 计算完整 prompt。
 本轮使用可控计数器验证选择策略，尚未完成真实 tokenizer 与 VLM 质量评测。
-完整大表格超过历史预算时明确失败，行级 patch 和超长块处理留待后续设计。
+新增显式参数 `allow_large_tail=True`：当尾块超过 1536 token 时，可以在调用方传入的真实 `token_budget` 内单独返回完整尾块；仍不截断、不摘要，不附加只读前缀。默认 False 的现有行为不变。调用方必须另外检查完整 prompt 和回传整个尾块所需输出预算，不能只检查输入。
+
+[本地 CLI](server_pipeline.md) 已接入该通道，并在必要时缩小 OCR 输入窗口。整个尾块仍无法容纳时明确失败；任意长度块和表格行级 patch 仍未设计。
 
 ## 离线文件导出
 
@@ -137,5 +139,5 @@ uv run pytest tests/test_c2d_xml.py tests/test_c2d_assembler.py tests/test_assem
 本轮服务端全量测试 155 项通过，相关 Python 文件的 Ruff 检查和 diff 空白检查通过。
 四轮样例也已通过本地命令实际生成 document.c2d.xml；这是固定样例验证，不是模型实测。
 
-真实 VLM 请求、完整 prompt 预算校验和模型续写质量尚未接入验证；
-下一阶段可用本轮闭环承接模型响应。
+新增本地 CLI 已接入真实 VLM 请求接口、完整 prompt 预算预检、恢复与有限纠错，
+其代码验证与真实 GPU 验收边界见 [服务端 Pipeline](server_pipeline.md)。本页旧测试数量记录属于原组装器实现批次，不代表新增 CLI 的真实模型质量验证。

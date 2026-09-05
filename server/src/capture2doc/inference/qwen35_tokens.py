@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from capture2doc.config import Qwen35Settings
+from capture2doc.inference.messages import image_messages
 
 IMAGE_PAD_TOKEN = "<|image_pad|>"
 
@@ -108,6 +109,7 @@ def inspect_qwen35_tokens(
     enable_thinking: bool = False,
     processor: Any | None = None,
     image: Any | None = None,
+    system_prompt: str | None = None,
 ) -> Qwen35TokenInspection:
     """Render the official template and count expanded visual placeholders."""
 
@@ -129,15 +131,7 @@ def inspect_qwen35_tokens(
     processor_size["longest_edge"] = settings.max_pixels
     image_processor.size = processor_size
 
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image"},
-                {"type": "text", "text": prompt},
-            ],
-        }
-    ]
+    messages = image_messages(prompt, system_prompt=system_prompt)
     rendered_prompt = local_processor.apply_chat_template(
         messages,
         tokenize=False,

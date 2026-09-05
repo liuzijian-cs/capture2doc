@@ -4,11 +4,11 @@
 
 ## 通用规则
 
-### 与远端新增 CLI 的映射（晚到变更，尚未合并）
+### 与已合并服务端 CLI 的映射（HTTP 仍待评审）
 
-本轮结束时发现 origin/main 新增 `d881227`、`89cef78`，实现并记录了可恢复 CLI，但明确未接入 HTTP。其内部字段为 document_id、不可变 image_id、ordered_image_ids。HTTP 提案中的 documentId 对应 document_id，pageId 对应 image_id，pageIds 对应 ordered_image_ids；不得因此在服务端再引入一层可修订逻辑页。
+本次提交整合 origin/main 的 `d881227`、`89cef78` 和 `d0cb5c5`，保留可恢复 CLI、WSL 验证记录及 Schema 错误位置/代码块修复说明；尚未接入 HTTP。其内部字段为 document_id、不可变 image_id、ordered_image_ids。HTTP 提案中的 documentId 对应 document_id，pageId 对应 image_id，pageIds 对应 ordered_image_ids；不得因此在服务端再引入一层可修订逻辑页。
 
-本轮 Android 已移除重拍复用，每张新增照片获得新 pageId，首次上传时可直接将其作为该文档下不可变 image_id；同 ID 不同摘要仍拒绝。旧单草稿从未关联远端，原有重拍占位恢复为失败，不上传占位。此映射需服务端 HTTP 适配层评审确认。
+本轮 Android 已移除重拍复用，每张新增照片获得新 pageId，首次上传时可直接将其作为该文档下不可变 image_id；同 ID 不同摘要仍拒绝。旧单草稿从未关联远端，原有重拍占位恢复为失败，不上传占位。此映射需服务端 HTTP 适配层评审确认。上游 /images/{image_id} 路由草案与本客户端 /pages/{pageId} 提案尚未统一，不能把 JSON 命名映射当成已经可调用的兼容 API。
 
 CLI 的 complete、needs_review 和中断状态不能直接照搬为客户端 COMPLETED。只有协议定义的最终结果完整且服务端确认可交付时才返回 COMPLETED；needs_review 如何在任务页展示须补充产品决定，不能静默吞掉复核标记。本轮未新增复核 UI。
 

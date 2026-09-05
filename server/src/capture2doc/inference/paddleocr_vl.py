@@ -33,6 +33,7 @@ def recognize_image(
     *,
     client: Any | None = None,
     max_tokens: int | None = None,
+    allow_empty: bool = False,
 ) -> OcrResult:
     """Send one image in user-provided order to the local VLM worker."""
 
@@ -59,7 +60,9 @@ def recognize_image(
     )
     content = response.choices[0].message.content
     if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("PaddleOCR-VL returned an empty OCR response")
+        if not allow_empty:
+            raise RuntimeError("PaddleOCR-VL returned an empty OCR response")
+        content = content if isinstance(content, str) else ""
 
     if hasattr(response, "model_dump"):
         raw_response = response.model_dump(mode="json")

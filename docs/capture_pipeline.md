@@ -14,6 +14,10 @@
 
 本次真机通过记录来自用户部署后反馈“可以测试通过”，按当前离线拍摄版本的人工冒烟验收记录；不代表 connectedDebugAndroidTest、长时间后台/进程恢复专项或服务端 OCR/VLM 链路通过。详细证据范围见 [本轮任务首页回归](android_camera_testing.md#本轮任务首页回归)。
 
+服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。
+
+服务端实体仅 document_id、不可变 image_id 和 ordered_image_ids。Android 本轮移除重拍后每张新照片有独立 pageId，拟在 HTTP 边界映射为 image_id；pageIds 映射最终 ordered_image_ids。同 ID 不同摘要拒绝，不增加逻辑页面修订。CLI 从输入清单导入并冻结列表，不是实时上传服务；HTTP 路由仍需统一评审。
+
 ## 2. 当前客户端流程
 
 ```mermaid
@@ -137,7 +141,7 @@ VLM 恢复用户确认顺序中的跨页段落、列表、表格和层级，不�
 | 所需页 OCR 失败 | 红色失败，不静默跳页；服务端重识别操作尚未实现 |
 | XML 更新失败 | 组装器不提交错误更新；模型重试由后续调度负责 |
 
-XML apply_update 的重复应用不是幂等操作，不能将页面 PUT 重试逻辑直接套在组装更新上。流式 block 的事件去重、revision、尾块修订与断线续传仍需要联调。
+XML apply_update 的重复应用不是幂等操作，不能将页面 PUT 重试逻辑直接套在组装更新上。本地 CLI 已用原子轮次日志、输入游标和哈希绑定恢复已提交结果，模型请求可能重试但提交日志不重复应用。流式 block 的事件去重、revision、尾块修订与断线续传仍需要联调。
 
 ## 5. 数据、生命周期与资源边界
 
@@ -145,7 +149,7 @@ XML apply_update 的重复应用不是幂等操作，不能将页面 PUT 重试�
 
 每个任务首次记录的非空服务地址保持不变，不能因构建配置改变而向另一服务补传旧图片；离线创建且地址为空的任务可在后续配置、重开 App 时首次绑定。WorkManager 使用 CONNECTED 网络约束、独立任务链及指数退避；系统可延迟执行，后台状态不承诺实时。冷启动重新载入上传确认、最终快照和隐藏标记，重试同一请求身份。真实断网、进程死亡、系统调度及服务端协同仍待设备联调验证。
 
-页面 ID、采集顺序、来源路径、内容摘要均为内部元数据，不加入公开 C2D-XML。模型配置沿用已合并模型文档：PaddleOCR-VL-1.6 完整页面 pipeline 是目标，当前 Worker 的 recognize_image 仅 OCR:；NVIDIA 16GB 默认 Qwen3.5-9B FP8，Apple Silicon 16GB 默认 4B 4-bit。立即入队不承诺双模型常驻或并行推理，显存调度仍由服务端负责。
+页面 ID、采集顺序、来源路径、内容摘要均为内部元数据，不加入公开 C2D-XML。模型配置沿用已合并模型文档：PaddleOCR-VL-1.6 完整页面 pipeline 是目标，当前 Worker 的 recognize_image 仅 OCR:；NVIDIA 16GB 默认 Qwen3.5-9B FP8，Apple Silicon 16GB 默认 4B 4-bit。立即入队不承诺双模型常驻或并行推理。本地 CLI 已实现 Paddle → Qwen 顺序装卸、进程及显存清理门禁；实时上传/OCR 等待及多文档公平调度仍待业务 HTTP 层实现。
 
 ## 6. 联调前必须完成的决策
 
@@ -158,6 +162,6 @@ XML apply_update 的重复应用不是幂等操作，不能将页面 PUT 重试�
 | 保存与移除 | 多草稿可续拍；本机隐藏不取消后台 | 远端资产保留与配额、孤立图片清理 |
 | 恢复 | 客户端 WorkManager、清单、确认与隐藏标记 | 真机网络/进程恢复、服务端持久化 |
 | 流式 | 协议提案保留事件 ID / block revision | SSE 保留期限、断线续传、XML 更新映射 |
-| 模型与输出 | XML 组装模块与 Worker 独立实现 | 业务调度、模型质量、Renderer 与端到端验收 |
+| 模型与输出 | 双模型串行 CLI、动态尾块预算、XML 与检查点恢复已实现；上游单图 GPU 验证已有 | 实时业务调度、多图及模型质量、Renderer 与 Android 端到端验收 |
 
 HTTP 路径和字段见 [客户端 v1 提案](android_task_protocol.md)，不是已经冻结或部署的服务端接口。
