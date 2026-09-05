@@ -1,6 +1,6 @@
 # Qwen3.5-9B FP8 输入 Token 与独立 Worker
 
-> 状态：NVIDIA/WSL 原型实现，单图真实模型冒烟已通过
+> 状态：NVIDIA/WSL 原型实现，单图冒烟和长上下文压力测试已通过
 > 记录日期：2026-09-03  
 > 模型：`Qwen/Qwen3.5-9B`，ModelScope `master` revision  
 > 目标环境：vLLM 0.28.0、RTX 4070 Ti Super 16GB
@@ -105,9 +105,14 @@ processor 渲染真实模板；若完整 prompt 超过 `16384 - 8192 = 8192` tok
 
 Qwen3.5-9B 有 8 个 full-attention 层。仅按 BF16 K/V 粗略估计，完整 16K 序列约需
 512 MiB KV cache；混合 DeltaNet 状态、block 对齐和实现开销仍需余量，因此首轮固定
-1 GiB。实测 640 MiB 可为 16K 单序列提供 17788 tokens 的 KV 容量，当前作为 CLI
-推荐覆盖值；512 MiB 只有 14108 tokens，无法覆盖 16K。该配置只约束 cache，不代表
-整个 Worker 的显存上限。
+1 GiB。实测 640 MiB 可为 16K 单序列提供 17788 tokens 的 KV 容量，并已经完成
+`5376 prompt + 8192 output` 强制长输出测试，当前作为 CLI 生产推荐覆盖值；512 MiB
+只有 14108 tokens，无法覆盖 16K。该配置只约束 cache，不代表整个 Worker 的显存
+上限。
+
+同一 640 MiB KV cache 在 `max_model_len=17728` 的实验 Worker 中报告 18207-token
+容量，并完成 `9472 prompt + 8192 output`。实际总长度为 17664，只剩 64-token context
+余量，输出末段 KV 使用率达到 100%，因此只作为已验证极限，不作为默认配置。
 
 ## 使用方式
 
@@ -141,6 +146,7 @@ uv run --extra cuda python scripts/smoke_qwen35.py \
 ## 后续验证
 
 - 1280 image-token 档对手机文档小字、表格和公式复核的质量；
-- 640 MiB KV cache 在长输入、长输出和重复运行下的稳定性；
-- 8192 输出 token 是否满足真实 C2D-XML 样本；
+- 真实约 4K OCR 文本到 C2D-XML 的内容质量、Schema 合法率和实际输出长度；
+- PaddleOCR-VL 与 Qwen 重复加载、推理和卸载时的资源清理与 semaphore warning；
+- 8192 输出上限是否满足真实 C2D-XML 样本；
 - 单图通过后，多图输入及 PaddleOCR-VL 与 Qwen 的顺序/同时常驻策略。

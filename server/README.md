@@ -78,21 +78,30 @@ vLLM 日志，以及启动前、模型加载后、推理峰值和退出后的 GP
 uv run --extra cuda python scripts/stress_qwen35.py \
   --image /absolute/path/document.jpg \
   --host 10.255.255.254
-
 ```
 
-脚本生成 tokenizer 精确计数的 4K/8K 合成文本，并依次验证：
+脚本生成 tokenizer 精确计数的 4K/8K 合成文本。2026-09-04 的完整矩阵实测结果为：
 
-- 16K context 下，单图加 4K 文本实际生成 2K、4K 和 8K tokens；
-- 16K context 下，单图加 8K 文本预检失败，不加载模型；
-- 17728 context 下，单图加 8K 文本进行非生产边界实验。
+- 16K context 下，完整 5376-token prompt 实际生成 2K、4K 和 8K tokens，全部通过；
+- 16K context 下，9472-token prompt 在预留 8K 输出时被正确拒绝；
+- 17728 context 下，9472-token prompt 实际生成 2K、4K 和 8K tokens，全部通过。
+
+最后一项的实际总长度为 17664，只剩 64 tokens，输出末段 KV 使用率达到 100%，因此
+仅是已验证容量上限。生产仍推荐 16K context、8K 最大输出和 640 MiB KV cache，不应
+自动切换到 17728。
 
 长输出请求通过 `ignore_eos=true` 强制生成到上限，只用于容量和稳定性测试，不用于
-评价输出质量。完整矩阵可能运行较长时间，也可能在边界用例触发 OOM。结果会在每个
-阶段结束后立即写入 `.cache/qwen35-stress/`；边界失败不会覆盖已经完成的阶段。
+评价输出质量；正常业务请求必须允许模型输出 EOS。完整矩阵本次耗时约 39 分钟，结果
+会在每个阶段结束后立即写入 `.cache/qwen35-stress/`；边界失败不会覆盖已经完成的阶段。
 可以用 `--case 4k-default`、`--case 8k-rejection` 或 `--case 8k-boundary` 单独重跑。
 完整矩阵中若 `4k-default` 未通过，脚本会跳过更激进的 `8k-boundary`；显式选择边界
 用例时则允许独立执行。
+
+生产请求建议为模板和工具定义保留至少 512 tokens，并动态限制输出：
+
+```text
+allowed_output = min(8192, max_model_len - prompt_tokens - 512)
+```
 
 ## WSL 兼容和资源覆盖
 
