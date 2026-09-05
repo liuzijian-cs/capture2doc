@@ -12,6 +12,8 @@ Qwen3.5-9B 在 Capture2Doc 中用于关联页面解析结果、过滤无关内�
 C2D-XML。本阶段先把它作为独立的单图 VLM Worker 验证，不与 PaddleOCR-VL 同时
 常驻，也不把原始模型输出视为已经通过 C2D-XML 校验的文档。
 
+2026-09-05 流程边界补充：目标调度在最终页面集合、顺序与有效内容版本被冻结，且所需 OCR 结果齐备后才调用 Qwen。模型遵循用户确认页序恢复跨页结构，不按上传/OCR 回调顺序处理，也不自行重排采集页。独立单图 Worker 不等于多页调度或 XML 续写已经接通，见 [扫描 Pipeline](capture_pipeline.md) 和 [XML 增量组装](c2d_xml_assembly.md)。
+
 ## 当前配置
 
 | 参数 | 默认值 | 说明 |

@@ -5,6 +5,8 @@
 > 环境：WSL2、vLLM 0.28.0、PyTorch 2.13.0+cu130
 > 模型：`Qwen/Qwen3.5-9B@master`
 
+本页保留 2026-09-04 的独立 Worker 容量实验数据。2026-09-05 的 [扫描 Pipeline](capture_pipeline.md) 调整了 OCR 与最终组装的触发关系，没有重跑或改变本页实验：页面可提前入 OCR 队列，VLM 仍须等最终输入及有效结果齐备；本页不证明双模型并发、业务任务恢复或 Android 端到端联通。
+
 ## 当前生产推荐
 
 在当前 16GB NVIDIA 单并发、单图工作负载下，推荐使用：
