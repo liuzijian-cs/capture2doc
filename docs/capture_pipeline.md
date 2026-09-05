@@ -1,7 +1,9 @@
 # 扫描 Pipeline：从拍照到逐页 OCR 与文档组装
 
+> 后端首版更新：HTTP 上传/OCR 队列、完整文档 GET、Bearer 鉴权与 SSE 已实现；服务端协议以 [后端与逐块预览](server_service.md) 为准，OCR 等待终态、完成不设复核门槛。以下客户端交互及历史提案不代表 Android 已完成新协议适配。
+
 > 最近修订：2026-09-05，任务首页迁移。
-> 状态：Android 首页、多任务持久化、HTTP 客户端与 WorkManager 调度已实现；服务端业务 API 尚未接入，2026-09-05 用户确认当前离线拍摄版本真机测试通过；跨端联调未完成。
+> 状态：Android 首页、多任务持久化、HTTP 客户端与 WorkManager 调度已实现；后端 API/SSE 已部署并完成公网验收，Android 尚待适配，2026-09-05 用户确认当前离线拍摄版本真机测试通过；跨端联调未完成。
 > 产品交互见 [任务首页](android_task_home.md)，接口见 [Android 发起的 v1 协议提案](android_task_protocol.md)。模型与公开 XML 契约不因首页变更而修改。
 
 ## 1. 这次改变了什么
@@ -16,7 +18,7 @@
 
 服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。现已完成五轮有序八图实测，并冻结 [CLI 首版基线](server_pipeline_baseline_v0_1.md)：第五轮 57 块中 56 ok、1 局部 OCR 兜底，仍有内容和样式质量欠账。完成恢复与旧 V1 SIGTERM 测试分别记录，不能等同于 Android HTTP 联通。操作见 [服务端 Pipeline](server_pipeline.md)，证据见 [五轮报告](server_pipeline_evaluation_20260905.md)。
 
-服务端实体仅 document_id、不可变 image_id 和 ordered_image_ids。Android 本轮移除重拍后每张新照片有独立 pageId，拟在 HTTP 边界映射为 image_id；pageIds 映射最终 ordered_image_ids。同 ID 不同摘要拒绝，不增加逻辑页面修订。CLI 从输入清单导入并冻结列表，不是实时上传服务；HTTP 路由仍需统一评审。
+服务端实体仅 document_id、不可变 image_id 和 ordered_image_ids。Android 本轮移除重拍后每张新照片有独立 pageId，在 HTTP 边界映射为 image_id；pageIds 映射最终 ordered_image_ids。同 ID 不同摘要拒绝，不增加逻辑页面修订。CLI 从输入清单导入并冻结列表，不是实时上传服务；HTTP 路由和 SSE 以最新服务协议为准。
 
 ## 2. 当前客户端流程
 
@@ -92,22 +94,22 @@ sequenceDiagram
     App->>API: 后台补传剩余页面
     App->>API: 引用页全部确认后finalize
     API->>API: 接受并冻结最终输入
-    OCR-->>API: 有效OCR结果
-    API->>VLM: 结果齐备后按最终页序组装
+    OCR-->>API: OCR终态参考
+    API->>VLM: 引用OCR终态齐备后按最终页序组装
     VLM-->>API: 增量XML校验、尾块更新及最终文档
-    App->>API: 查询文档及逐页flag
-    API-->>App: 状态、最终标题、字数与只读文本
+    App->>API: 订阅SSE预览并查询完整文档
+    API-->>App: status、最终标题、字数、完整C2D-XML及摘要
 ```
 
 ### 阶段职责与完成条件
 
 | 阶段 | 触发条件与产物 | 负责方 |
 |---|---|---|
-| 创建 | 本地持久化任务即可拍摄，后台关联真实文档 ID 后才上传 | Android 客户端 / 待接入 API |
-| 上传 | 派生图就绪；页面 ID + SHA-256 确认 | Android WorkManager / 待接入 API |
-| OCR | 服务端可靠接收后排队；绑定页面及内容摘要 | 待接入业务队列 / 独立 Worker |
-| 最终提交 | 本地快照先保存；全部引用页确认后发请求 | Android / 待接入 API |
-| 文档组装 | 服务端接受最终集合，所需 OCR 结果齐备 | 待接入任务调度 / VLM |
+| 创建 | 本地持久化任务即可拍摄，后台关联真实文档 ID 后才上传 | Android 客户端 / 服务端 API |
+| 上传 | 派生图就绪；页面 ID + SHA-256 确认 | Android WorkManager / 服务端 API |
+| OCR | 服务端可靠接收后排队；绑定页面及内容摘要 | SQLite 持久化队列 / 独立 Worker |
+| 最终提交 | 本地快照先保存；全部引用页确认后发请求 | Android / 服务端 API |
+| 文档组装 | 服务端接受最终集合，所需 OCR 任务进入终态 | 独立 worker / VLM |
 | XML 与输出 | 校验、尾块更新、序列化；再由目标 Renderer 输出 | 已有 XML 模块 / 未实现 Renderer |
 
 ### 最终页序与三个“完成”
@@ -149,19 +151,19 @@ XML apply_update 的重复应用不是幂等操作，不能将页面 PUT 重试�
 
 每个任务首次记录的非空服务地址保持不变，不能因构建配置改变而向另一服务补传旧图片；离线创建且地址为空的任务可在后续配置、重开 App 时首次绑定。WorkManager 使用 CONNECTED 网络约束、独立任务链及指数退避；系统可延迟执行，后台状态不承诺实时。冷启动重新载入上传确认、最终快照和隐藏标记，重试同一请求身份。真实断网、进程死亡、系统调度及服务端协同仍待设备联调验证。
 
-页面 ID、采集顺序、来源路径、内容摘要均为内部元数据，不加入公开 C2D-XML。模型配置沿用已合并模型文档：PaddleOCR-VL-1.6 完整页面 pipeline 是目标，当前 Worker 的 recognize_image 仅 OCR:；NVIDIA 16GB 默认 Qwen3.5-9B FP8，Apple Silicon 16GB 默认 4B 4-bit。立即入队不承诺双模型常驻或并行推理。本地 CLI 已实现 Paddle → Qwen 顺序装卸、进程及显存清理门禁；实时上传/OCR 等待及多文档公平调度仍待业务 HTTP 层实现。
+页面 ID、采集顺序、来源路径、内容摘要均为内部元数据，不加入公开 C2D-XML。模型配置沿用已合并模型文档：PaddleOCR-VL-1.6 完整页面 pipeline 是目标，当前 Worker 的 recognize_image 仅 OCR:；NVIDIA 16GB 默认 Qwen3.5-9B FP8，Apple Silicon 16GB 默认 4B 4-bit。立即入队不承诺双模型常驻或并行推理。本地 CLI 已实现 Paddle → Qwen 顺序装卸、进程及显存清理门禁；实时上传、OCR 等待和最早 finalize 优先调度已由服务层实现。
 
 ## 6. 联调前必须完成的决策
 
-| 主题 | 已决定/客户端已实现 | 服务端待确认或后续工作 |
-|---|---|---|
-| 上传载荷 | 最长边1280 JPEG，pageId + SHA-256 确认 | 实际大小限制、同内容复用与拒绝策略 |
-| 创建 | 可离线拍摄并提示未连接，上传前关联文档 ID，持久化幂等键 | 创建幂等存储、鉴权与账户隔离 |
-| 最终提交 | 本地冻结后回首页，补传齐备再发送 | API 幂等、缺页冲突、OCR 齐备门禁 |
-| 状态 | 查询 flag，最终标题、字数及 plainText | 逐页状态、最终字数口径、真实模型进度 |
-| 保存与移除 | 多草稿可续拍；本机隐藏不取消后台 | 远端资产保留与配额、孤立图片清理 |
-| 恢复 | 客户端 WorkManager、清单、确认与隐藏标记 | 真机网络/进程恢复、服务端持久化 |
-| 流式 | 协议提案保留事件 ID / block revision | SSE 保留期限、断线续传、XML 更新映射 |
-| 模型与输出 | 双模型串行 CLI、动态尾块预算、XML 与检查点恢复已实现；上游单图 GPU 验证已有 | 实时业务调度、多图及模型质量、Renderer 与 Android 端到端验收 |
+后端接口已确定并部署，Android 待按 [服务协议](server_service.md) 适配。下面列出下一轮联调边界，不把旧客户端提案当成当前后端响应。
 
-HTTP 路径和字段见 [客户端 v1 提案](android_task_protocol.md)，不是已经冻结或部署的服务端接口。
+| 主题 | 已实现的服务端行为 | Android 下一步 |
+|---|---|---|
+| 上传 | JPEG ≤10 MiB、长边≤1280，ID/摘要幂等与冲突检查 | 确认实际派生 JPEG 字节，记录上传耗时和断流重试 |
+| 鉴权 | 个人多设备 Bearer，摘要存储与撤销，HTTPS | 接入设备令牌和安全保存；未配置时保持离线采集 |
+| 提交 | pageIds 冻结，OCR 终态门禁，确认顺序组装 | 持久化最终顺序，补传后幂等 finalize |
+| 最终结果 | status、完整 c2dXml、UTF-8 摘要，needsReview=false | 替换旧 flag/plainText 查询模型，校验摘要并采用最终 XML |
+| 流式 | 持久化 SSE、稳定 blockId/version、原子 patch 和 Last-Event-ID | 原子保存预览/游标，支持插入、替换、撤回和快照重建 |
+| 恢复 | outbox 去重、检查点预算继承、GPU 清理门禁 | 真机网络、进程及后台调度联调 |
+| 保存与移除 | 数据保留、配额、手动清理；断开 SSE 不取消任务 | 继续区分本地隐藏与服务器执行 |
+| 渲染 | 服务端提供合法 XML；局部兜底不阻止完成 | 同一渲染层消费单块预览和最终 XML，不增加复核门槛 |
