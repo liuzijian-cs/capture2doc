@@ -5,7 +5,15 @@ from __future__ import annotations
 from copy import deepcopy
 from uuid import uuid4
 
-from .blocks import add_errors, candidate, combined_errors, error, fallback
+from .blocks import (
+    add_errors,
+    candidate,
+    combined_errors,
+    error,
+    fallback,
+    protected_code,
+    structural_text,
+)
 
 MAX_REPAIRS = 5
 
@@ -155,6 +163,66 @@ def start_attempt(draft: dict, targets: list[str], kind: str = "repair") -> dict
     return attempt
 
 
+def preserve_content(old: list[dict], replacements: list[dict]) -> None:
+    """Reject the entire patch before a failed rewrite can replace saved text."""
+    old_text = "".join(b["text"] or "" for b in old)
+    new_text = "".join(b["text"] or "" for b in replacements)
+    expected, actual = structural_text(old_text), structural_text(new_text)
+    if all(
+        isinstance(b["text"], str) and (b["text"].strip() or b["status"] == "ok")
+        for b in old
+    ):
+        preserved = expected == actual
+    else:
+        # Missing text may be recovered from the image. Retain every known
+        # neighbor in order, without reusing one occurrence for multiple blocks.
+        offset, preserved = 0, True
+        for b in old:
+            known = structural_text(b["text"] or "")
+            position = actual.find(known, offset)
+            if position < 0:
+                preserved = False
+                break
+            offset = position + len(known)
+    if not preserved:
+        index = next(
+            (i for i, (a, b) in enumerate(zip(expected, actual)) if a != b),
+            min(len(expected), len(actual)),
+        )
+        raise RejectedPatch(
+            "REPAIR_CONTENT_CHANGED: 结构修复必须保留整个目标组的文字、顺序和重复次数；"
+            "失败块的独立 text 也必须保留。仅允许结构换行变化，不得改写、总结或删减。"
+            f"首个差异位于归一化字符 {index}；"
+            f"期望={expected[max(0, index - 24) : index + 72]!r}；"
+            f"实际={actual[max(0, index - 24) : index + 72]!r}。"
+            "原候选保持不变，请按 targets 的完整文字重新修复。"
+        )
+    # Code can move out of an invalid blockquote, but its indentation, line
+    # breaks, spaces inside strings and trailing newline must remain exact.
+    new_codes = [value for b in replacements for value in protected_code(b)]
+    offset = 0
+    for code in (value for b in old for value in protected_code(b)):
+        matched_end = None
+        for start in range(offset, len(new_codes)):
+            combined = ""
+            for end in range(start, len(new_codes)):
+                combined += new_codes[end]
+                if combined == code:
+                    matched_end = end + 1
+                    break
+                if not code.startswith(combined):
+                    break
+            if matched_end is not None:
+                break
+        if matched_end is None:
+            raise RejectedPatch(
+                "REPAIR_CODE_WHITESPACE_CHANGED: 代码内容及缩进、换行、字符串内空格"
+                "必须逐字保留；仅移动 pre/code 结构。"
+                f"缺失的原始代码片段={code[:160]!r}。原候选保持不变。"
+            )
+        offset = matched_end
+
+
 def apply_patch(draft: dict, attempt: dict, proposal: dict) -> None:
     if (
         attempt["status"] == "applied"
@@ -185,8 +253,22 @@ def apply_patch(draft: dict, attempt: dict, proposal: dict) -> None:
     # A malformed repair must not destroy the independently saved text. Only
     # reuse it for an unambiguous one-to-one replacement, never copy a whole
     # ancestor into every child of a split.
-    if len(old) == len(replacements) == 1 and not replacements[0]["text"]:
+    if (
+        len(old) == len(replacements) == 1
+        and replacements[0]["status"] == "pending"
+        and not replacements[0]["text"]
+    ):
         replacements[0]["text"] = old[0]["text"]
+    preserve_content(old, replacements)
+    if old[0].get("replaces_tail"):
+        tail_text = draft["old_tail"]["text"] or ""
+        if not (replacements[0]["text"] or "").startswith(tail_text) or (
+            tail_text and any(tail_text in (b["text"] or "") for b in replacements[1:])
+        ):
+            raise RejectedPatch(
+                "TAIL_CONTENT_LOSS: 旧尾块全文必须原样保留在第一个替换块开头；"
+                "不得移入其他子块，也不得在其他子块重复旧尾。整个原候选组保持不变。"
+            )
     errors = [e for b in old for e in b["errors"]]
     guards = [e for b in old for e in b["guards"]]
     for index, b in enumerate(replacements):
@@ -210,29 +292,6 @@ def apply_patch(draft: dict, attempt: dict, proposal: dict) -> None:
         )
     if old[0].get("replaces_tail"):
         replacements[0]["replaces_tail"] = True
-    # Preserve successful neighbors if a grouped repair accidentally drops their text.
-    new_text = "".join(b["text"] or "" for b in replacements)
-    for old_block in old:
-        if (
-            old_block["status"] == "ok"
-            and old_block["text"]
-            and old_block["text"] not in new_text
-        ):
-            for b in replacements:
-                b.update(
-                    status="pending", vlm_validation="failed", final_validation="failed"
-                )
-                add_errors(
-                    b,
-                    b["current_errors"]
-                    + [
-                        error(
-                            "PRESERVED_CONTENT_LOSS",
-                            "关联修复丢失了此前通过的块文字；保留邻居原文。",
-                            [x["id"] for x in replacements],
-                        )
-                    ],
-                )
     draft["blocks"][min(indices) : max(indices) + 1] = replacements
     check_tail(draft)
     attempt["status"] = "applied"
@@ -264,6 +323,19 @@ def resolve_fallback(draft: dict, sources: list[dict], committed: list[dict]) ->
             b["ocr_refs"] = [
                 r for r in b["ocr_refs"] if r.startswith(draft["image_id"] + ":ocr:")
             ]
+            source_text = "".join(
+                source["text"]
+                for source in sources
+                if source["source_id"] in b["ocr_refs"]
+            ).rstrip("\r\n")
+            # Current-image provenance alone does not prove that an OCR line
+            # excludes an overlapping old tail. Only a known new suffix can
+            # authorize its matching OCR text; otherwise keep the safe suffix
+            # or an unresolved hole, never the old text a second time.
+            if b["text"] is None or structural_text(source_text) != structural_text(
+                b["text"]
+            ):
+                b["ocr_refs"] = []
     fallback(draft["blocks"], sources, reserved=reserved)
 
 

@@ -6,6 +6,7 @@ from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, replace
 from difflib import SequenceMatcher
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -202,6 +203,44 @@ def plain_text(node: Any) -> str:
         if etree.QName(node).localname not in {"code", "pre"}
         else result
     )
+
+
+def structural_text(text: str) -> str:
+    """Ignore layout breaks, retaining ordinary spaces inside a line of text."""
+    return re.sub(r"[ \t]*[\r\n]+[ \t]*", "", text).replace("\t", "")
+
+
+def protected_code(block: dict) -> list[str]:
+    """Find exact code evidence for repair guards, never for fallback extraction.
+
+    A schema-invalid container may still have safely readable code children.
+    Syntax-invalid XML cannot identify those boundaries, so conservatively keep
+    its independently saved text unchanged when it contains a code tag.
+    """
+    xml, text = block.get("xml"), block.get("text")
+    if not isinstance(xml, str) or not isinstance(text, str) or not text:
+        return []
+    if not re.search(r"<(?:[\w.-]+:)?(?:pre|code)(?:\s|>)", xml):
+        return []
+    try:
+        root = etree.fromstring(
+            envelope(xml).encode(),
+            etree.XMLParser(resolve_entities=False, no_network=True, recover=False),
+        )
+        if root.getroottree().docinfo.doctype or any(
+            not isinstance(node.tag, str) for node in root.iter()
+        ):
+            return [text]
+    except (etree.LxmlError, UnicodeError):
+        return [text]
+    values = []
+    for node in root.iter(f"{{{NS}}}code"):
+        value = "".join(node.itertext())
+        # Independent text is the content authority for a failed candidate.
+        # Conflicting XML is diagnostic evidence, not replacement fallback text.
+        if value and value in text:
+            values.append(value)
+    return values
 
 
 def segments(image_id: str, text: str) -> list[dict]:

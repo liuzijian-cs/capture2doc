@@ -29,8 +29,10 @@ from capture2doc.pipeline.document import (
 from capture2doc.pipeline.draft import (
     RejectedPatch,
     apply_patch,
+    commit_blocks,
     initialize,
     new_draft,
+    resolve_fallback,
     start_attempt,
 )
 from capture2doc.pipeline.store import write_json
@@ -290,7 +292,7 @@ def test_stale_duplicate_and_out_of_scope_responses_are_rejected():
     proposal = {
         "attempt_id": attempt["attempt_id"],
         "target_versions": attempt["target_versions"],
-        "blocks": [block("修好")],
+        "blocks": [block("甲")],
     }
     with pytest.raises(RejectedPatch, match="scope"):
         apply_patch(draft, attempt, {**proposal, "target_versions": {"forbidden": 0}})
@@ -314,7 +316,11 @@ def test_split_and_merge_inherit_shared_budget():
         proposal = {
             "attempt_id": attempt["attempt_id"],
             "target_versions": attempt["target_versions"],
-            "blocks": [block("仍失败", "<bad/>")] * (2 if count % 2 else 1),
+            "blocks": (
+                [block("失", "<bad/>"), block("败", "<bad/>")]
+                if count % 2
+                else [block("失败", "<bad/>")]
+            ),
         }
         apply_patch(draft, attempt, proposal)
         assert max(draft["budgets"].values()) == count
@@ -612,3 +618,261 @@ def test_truncated_ocr_whole_image_fallback_marks_unknown_remainder(tmp_path):
     assert [b["status"] for b in doc["blocks"]] == ["fallback", "unresolved"]
     assert doc["blocks"][0]["text"] == "部分OCR"
     assert doc["xml_status"] == "partial"
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        [block("修复完成")],
+        [block("", "<bad/>"), block("", "<bad/>")],
+        [block("fft(audio)"), block("fft(audio)")],
+        [block("", "<hr/>")],
+    ],
+)
+def test_repair_rejects_content_loss_duplication_and_empty_split_atomically(
+    replacement,
+):
+    draft = new_draft("a", None)
+    initialize(
+        draft,
+        submit(
+            block(
+                "fft(audio)",
+                "<blockquote><pre><code>fft(audio)</code></pre></blockquote>",
+            )
+        ),
+    )
+    target = draft["blocks"][0]
+    attempt = start_attempt(draft, [target["id"]])
+    before = deepcopy(draft)
+    with pytest.raises(RejectedPatch, match="REPAIR_CONTENT_CHANGED"):
+        apply_patch(
+            draft,
+            attempt,
+            {
+                "attempt_id": attempt["attempt_id"],
+                "target_versions": attempt["target_versions"],
+                "blocks": replacement,
+            },
+        )
+    assert (
+        draft == before
+    )  # IDs, versions, source refs and useful original text survive.
+    assert draft["budgets"][target["id"]] == 1
+    assert target["repair_attempts"] == 1
+    fallback(draft["blocks"], [])
+    assert [(b["status"], b["text"]) for b in draft["blocks"]] == [
+        ("fallback", "fft(audio)")
+    ]
+
+
+def test_content_rejections_exhaust_budget_then_keep_text_and_process_next_image(
+    tmp_path,
+):
+    texts = {"a": "可用原文", "b": "后续图片"}
+    store = setup(tmp_path, texts)
+
+    def destructive_repair(payload):
+        return {
+            "action": "submit",
+            "attempt_id": payload["attempt_id"],
+            "target_versions": payload["target_versions"],
+            "blocks": [block("修复完成")],
+        }
+
+    models = Models(
+        texts,
+        actions=[submit(block("可用原文", "<bad/>"))] + [destructive_repair] * 5,
+    )
+    run(store, models)
+    output = result(store)["blocks"]
+    assert [b["text"] for b in output] == ["可用原文", "后续图片"]
+    assert output[0]["repair_attempts"] == 5
+    assert output[0]["fallback_source"] == "vlm_text"
+    assert any(e["code"] == "REPAIR_CONTENT_CHANGED" for e in output[0]["errors"])
+    assert len(models.requests) == 7
+    assert all(r["targets"][0]["text"] == "可用原文" for r in models.requests[1:6])
+
+
+def test_repair_cannot_copy_readonly_paragraph_and_table_into_its_target_group():
+    # Reproduce the real probe: one bad pre was expanded to pre + the already
+    # successful paragraph and table, duplicating both outside its own scope.
+    code = "fft(audio)\n"
+    paragraph_neighbor = block("下表展示结果")
+    table_neighbor = block(
+        "A\t1", "<table><tbody><tr><td>A</td><td>1</td></tr></tbody></table>"
+    )
+    draft = new_draft("a", None)
+    initialize(
+        draft,
+        submit(
+            block(code, f"<blockquote><pre><code>{code}</code></pre></blockquote>"),
+            paragraph_neighbor,
+            table_neighbor,
+        ),
+    )
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    before = deepcopy(draft)
+    with pytest.raises(RejectedPatch, match="REPAIR_CONTENT_CHANGED"):
+        apply_patch(
+            draft,
+            attempt,
+            {
+                "attempt_id": attempt["attempt_id"],
+                "target_versions": attempt["target_versions"],
+                "blocks": [
+                    block(code, f"<pre><code>{code}</code></pre>"),
+                    paragraph_neighbor,
+                    table_neighbor,
+                ],
+            },
+        )
+    assert draft == before
+    assert len(draft["blocks"]) == 3
+
+
+def test_repair_can_recover_missing_text_without_losing_known_group_content():
+    draft = new_draft("a", None)
+    initialize(draft, submit(block("", "<bad/>"), block("保留邻居")))
+    attempt = start_attempt(draft, [b["id"] for b in draft["blocks"]])
+    apply_patch(
+        draft,
+        attempt,
+        {
+            "attempt_id": attempt["attempt_id"],
+            "target_versions": attempt["target_versions"],
+            "blocks": [block("从图片恢复的文字"), block("保留邻居")],
+        },
+    )
+    assert [b["text"] for b in draft["blocks"]] == ["从图片恢复的文字", "保留邻居"]
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        'if ready:\n  print("a b")\n',
+        'if ready:\n\tprint("a b")\n',
+        'if ready:    print("a b")\n',
+        'if ready:\n    print("a b")',
+        '\nif ready:\n    print("a b")\n',
+        'if ready:\n    print("a b")\n\n',
+    ],
+)
+def test_repair_preserves_code_indentation_linebreaks_and_trailing_newline(changed):
+    code = 'if ready:\n    print("a b")\n'
+    draft = new_draft("a", None)
+    initialize(
+        draft,
+        submit(block(code, f"<blockquote><pre><code>{code}</code></pre></blockquote>")),
+    )
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    before = deepcopy(draft)
+    with pytest.raises(RejectedPatch, match="REPAIR_(CODE_WHITESPACE|CONTENT)_CHANGED"):
+        apply_patch(
+            draft,
+            attempt,
+            {
+                "attempt_id": attempt["attempt_id"],
+                "target_versions": attempt["target_versions"],
+                "blocks": [block(changed, f"<pre><code>{changed}</code></pre>")],
+            },
+        )
+    assert draft == before
+
+
+def test_repair_can_split_structure_while_retaining_exact_code():
+    code = 'if ready:\n    print("a b")\n'
+    draft = new_draft("a", None)
+    initialize(
+        draft,
+        submit(
+            block(
+                "引文\n" + code,
+                f"<blockquote><p>引文</p><pre><code>{code}</code></pre></blockquote>",
+            )
+        ),
+    )
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    apply_patch(
+        draft,
+        attempt,
+        {
+            "attempt_id": attempt["attempt_id"],
+            "target_versions": attempt["target_versions"],
+            "blocks": [
+                block("引文", "<blockquote><p>引文</p></blockquote>"),
+                block(code, f"<pre><code>{code}</code></pre>"),
+            ],
+        },
+    )
+    assert [b["text"] for b in draft["blocks"]] == ["引文", code]
+    assert all(b["status"] == "ok" for b in draft["blocks"])
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [block("新增"), block("旧尾")],
+        [block("旧"), block("尾新增")],
+    ],
+)
+def test_tail_repair_rejects_moved_or_split_history_as_one_atomic_group(values):
+    old_tail = candidate(block("旧尾"), "a")
+    draft = new_draft("b", old_tail)
+    initialize(draft, submit(tail=block("旧尾新增", "<bad/>")))
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    before = deepcopy(draft)
+    with pytest.raises(RejectedPatch, match="REPAIR_CONTENT_CHANGED|TAIL_CONTENT_LOSS"):
+        apply_patch(
+            draft,
+            attempt,
+            {
+                "attempt_id": attempt["attempt_id"],
+                "target_versions": attempt["target_versions"],
+                "blocks": values,
+            },
+        )
+    assert draft == before
+    resolve_fallback(draft, [], [old_tail])
+    output = commit_blocks([old_tail], draft)
+    assert [b["text"] for b in output] == ["旧尾", "新增"]
+
+
+def test_tail_repair_cannot_move_duplicate_history_into_a_successful_child():
+    old_tail = candidate(block("旧尾"), "a")
+    draft = new_draft("b", old_tail)
+    initialize(draft, submit(tail=block("旧尾新增旧尾", "<bad/>")))
+    attempt = start_attempt(draft, [draft["blocks"][0]["id"]])
+    before = deepcopy(draft)
+    with pytest.raises(RejectedPatch, match="TAIL_CONTENT_LOSS"):
+        apply_patch(
+            draft,
+            attempt,
+            {
+                "attempt_id": attempt["attempt_id"],
+                "target_versions": attempt["target_versions"],
+                "blocks": [block("旧尾新增"), block("旧尾")],
+            },
+        )
+    assert draft == before
+
+
+def test_unseparable_tail_disables_ocr_fallback_even_with_current_image_refs():
+    old_tail = candidate(block("旧尾", refs=["a:ocr:0"]), "a")
+    draft = new_draft("b", old_tail)
+    initialize(draft, submit(tail=block("无法区分旧新", "<bad/>", ["b:ocr:0"])))
+    resolve_fallback(draft, segments("b", "旧尾续写"), [old_tail])
+    output = commit_blocks([old_tail], draft)
+    assert [b["text"] for b in output] == ["旧尾", None]
+    assert output[1]["status"] == "unresolved"
+    assert not output[1]["ocr_refs"]
+
+
+def test_known_tail_suffix_uses_text_when_ocr_also_contains_history():
+    old_tail = candidate(block("旧尾", refs=["a:ocr:0"]), "a")
+    draft = new_draft("b", old_tail)
+    initialize(draft, submit(tail=block("旧尾续写", "<bad/>", ["b:ocr:0"])))
+    resolve_fallback(draft, segments("b", "旧尾续写"), [old_tail])
+    output = commit_blocks([old_tail], draft)
+    assert [b["text"] for b in output] == ["旧尾", "续写"]
+    assert output[1]["fallback_source"] == "vlm_text"
