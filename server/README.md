@@ -4,9 +4,17 @@ Capture2Doc 的本地推理服务。当前提供 NVIDIA/WSL 上可独立验证�
 PaddleOCR-VL-1.6 BF16 Worker 和 Qwen3.5-9B FP8 Worker。ModelScope 负责准备模型，
 vLLM 只加载本地快照。本地 CLI V2 将 Paddle OCR、Qwen 多 block 草稿与 C2D-XML 校验串行连接，
 主要输出文档 JSON 和完整逐块报告；每块最多五轮修复，耗尽后局部兜底并继续后续图片。支持不可变输入和检查点恢复，真实模型结果与质量限制见运行文档。
-暂不包含完整 PaddleOCR 页面 pipeline、HTTP 业务 API、Android 上传或通用 Agent 服务。
+新增 FastAPI HTTP 业务 API、独立 GPU worker 与 SSE 逐块预览；Android 消费适配留待下一轮。暂不包含完整 PaddleOCR 页面解析或通用 Agent 服务。
 
 当前冻结版本为 [pipeline-cli-v0.1.0](../docs/server_pipeline_baseline_v0_1.md)。整体流程、已知限制和下一步讨论依据集中在基线文档；配置与资源摘要见 [基线清单](baselines/pipeline_cli_v0_1.json)，真实质量证据见 [五轮报告](../docs/server_pipeline_evaluation_20260905.md)。
+
+## HTTP 与 SSE 服务
+
+使用 `uv sync --locked --extra cuda --extra service` 安装。通过 `capture2doc api --config <TOML>` 与
+`capture2doc worker --config <TOML>` 分别启动，CLI 基线不依赖 HTTP 服务。每设备令牌、存储、systemd、
+OpenResty 和断线续传见 [服务协议与运维](../docs/server_service.md)、[OpenAPI](../docs/server_openapi.json)
+及 [验收记录](../docs/server_service_validation.md)。公网 GET 返回完整 C2D-XML JSON；SSE 提供可更新的块预览，
+不改变模型整图候选响应或每图正式提交的边界。
 
 ## 文档转换 CLI
 

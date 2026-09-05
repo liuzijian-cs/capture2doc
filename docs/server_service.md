@@ -4,7 +4,7 @@
 
 ## 运行链路
 
-Android HTTPS + 每设备 Bearer token → volcano OpenResty → 现有 SD-WAN `100.64.250.1:11209` → FastAPI。API 只管理上传、状态和 SSE；独立 worker 负责 Paddle 与 Qwen。SQLite 是业务、预览及事件日志的持久化源，文件检查点是模型草稿、预算和正式正文的持久化源。
+Android HTTPS + 每设备 Bearer token → 公网 OpenResty → 现有 SD-WAN → 后端 TCP 11209 → FastAPI。API 只管理上传、状态和 SSE；独立 worker 负责 Paddle 与 Qwen。SQLite 是业务、预览及事件日志的持久化源，文件检查点是模型草稿、预算和正式正文的持久化源。
 
 创建文档后，每张 JPEG 上传完成即排 OCR。图片 ID 不可变，不再引入另一层可修订逻辑页。finalize 的 `pageIds` 冻结最终集合与顺序，所需 OCR 任务已有终态后才按此顺序调用 Qwen。未引用的图片不进入正文。OCR 截断、空结果和三次请求失败均保留实际状态，并作为终态参考；图像仍是 Qwen 的内容和样式依据。
 
@@ -60,7 +60,7 @@ worker 持有独占 worker/GPU/文档锁；正常 SIGTERM 进入清理，恢复�
 
 ## 配置、启动与运维
 
-安装：`cd server && uv sync --locked --extra cuda --extra service`。CPU 合约测试只需 `--extra service`。配置样例 [service.example.toml](../server/deploy/service.example.toml)，`[service]` 每个字段可由 `C2D_字段大写` 环境变量覆盖。默认数据目录 `/home/zane/.local/share/capture2doc`；包含数据库、documents 下 uploads/ocr/pipeline、worker-runs、tmp。目录权限 0700，服务 umask 0077。
+安装：`cd server && uv sync --locked --extra cuda --extra service`。CPU 合约测试只需 `--extra service`。配置样例 [service.example.toml](../server/deploy/service.example.toml)，`[service]` 每个字段可由 `C2D_字段大写` 环境变量覆盖。默认数据目录 `~/.local/share/capture2doc`；包含数据库、documents 下 uploads/ocr/pipeline、worker-runs、tmp。目录权限 0700，服务 umask 0077。
 
 默认限制：JPEG 10 MiB、长边 1280、每文档 100 图、10 个未完成文档、目录 50 GiB、剩余 20 GiB。容量检查包含在途上传预留；当前容量门槛用于接收新图，推理产物也计入之后的检查，不是文件系统硬配额。图片不再次压缩。状态和诊断长期保留，手动清理。
 
@@ -75,8 +75,14 @@ capture2doc storage prune --document-id DOCUMENT_ID --config ~/.config/capture2d
 # 确认列出的终态文档后加 --execute；清理前停止 API 和 worker。
 ```
 
-部署文件在 [server/deploy](../server/deploy)。WSL 在配置及依赖就绪后运行 `sudo sh server/deploy/install-wsl-system.sh`，安装两个非 root systemd 服务及独立 nftables 规则。仅允许本机和 volcano `100.64.250.2` 访问 11209，不修改 SSH 或其他现有规则。模型继续使用已验证的本地回环 `10.255.255.254`。
+部署文件在 [server/deploy](../server/deploy)。WSL 在配置及依赖就绪后运行 `sudo sh server/deploy/install-wsl-system.sh <SERVICE_USER> <CHECKOUT> <PRIVATE_CONFIG>`，安装两个非 root systemd 服务及独立 nftables 规则。仅允许本机和私密配置指定的代理节点访问 11209，不修改 SSH 或其他现有规则。模型继续绑定部署机私密配置中的本地回环地址。
 
-volcano 将 [openresty.conf](../server/deploy/openresty.conf) 加入 http include，证书路径按现有受管理通配符证书调整，先 `openresty -t` 再 reload。SSE 关闭响应缓冲/缓存/压缩、read_timeout=120s；上传关闭请求缓冲，不在跳板机持久化照片。WSL 离线时返回网关错误，手机保留原图重试。使用 [NGINX proxy_buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering) 和 [sse-starlette](https://github.com/sysid/sse-starlette) 的心跳/发送超时能力。
+仓库中的 systemd、nftables 和 [openresty.conf](../server/deploy/openresty.conf) 均为模板。通过 `server/scripts/render_service_deployment.py --config <PRIVATE_CONFIG> --checkout <CHECKOUT> --user <SERVICE_USER> --output <PRIVATE_OUTPUT>` 在部署机生成；需生成代理配置时同时传入 `--public-host`、`--certificate`、`--certificate-key`，实际值仅在机器本地传递。渲染后的 OpenResty 配置加入代理的 http include，先 `openresty -t` 再 reload。SSE 关闭响应缓冲/缓存/压缩、read_timeout=120s；上传关闭请求缓冲，不在跳板机持久化照片。WSL 离线时返回网关错误，手机保留原图重试。使用 [NGINX proxy_buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering) 和 [sse-starlette](https://github.com/sysid/sse-starlette) 的心跳/发送超时能力。
 
 模拟 Android 的客户端 [test_service_client.py](../server/scripts/test_service_client.py) 接收 `--base-url --token-file --output --images <按序图片...>`；支持已有 `--document-id`。令牌文件为 token create 输出 JSON 或原始 token，禁止提交。客户端持久化 snapshot/cursor，主动断线一次后重连，保存完整事件、首块延迟、投递延迟、最终 GET/XML 和摘要/节点一致性结果。输出目录应放 `.cache` 或数据根目录，避免把真实文档提交 Git。
+
+## 联合开发与信息边界
+
+接口交接以 [服务端 / Android 交接](server_android_handoff.md) 为准。Git 仅保存协议、技术架构、端口、通用配置模板和不含环境标识的验证摘要；真实公网地址、内网地址、系统账号、证书实际路径、令牌、原始文档及文档身份留在机器本地。服务默认只绑定回环地址，生产环境必须通过私密 TOML 显式指定后端、代理和模型回环地址。
+
+每阶段先验证、再提交与远端同步；同步前复核双方分支和未提交工作。安卓存在未提交工作时，不切换或重置其分支，不代写安卓功能；共享协议同步与安卓功能开发分别记录。已发布历史不在联合开发期间强制重写。

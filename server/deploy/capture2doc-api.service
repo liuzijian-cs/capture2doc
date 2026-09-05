@@ -1,3 +1,4 @@
+# Template: render locally before installation.
 [Unit]
 Description=Capture2Doc authenticated HTTP and SSE API
 After=network-online.target capture2doc-firewall.service
@@ -6,9 +7,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=zane
-WorkingDirectory=/home/zane/workspace/project/capture2doc/server
-ExecStart=/home/zane/workspace/project/capture2doc/server/.venv/bin/capture2doc api --config /home/zane/.config/capture2doc/service.toml
+User=@SERVICE_USER@
+WorkingDirectory=@SERVER_DIR@
+ExecStart=@EXECUTABLE@ api --config @CONFIG_FILE@
 Restart=on-failure
 RestartSec=5
 UMask=0077
