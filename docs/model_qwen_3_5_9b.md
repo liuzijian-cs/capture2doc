@@ -12,7 +12,7 @@ Qwen3.5-9B 在 Capture2Doc 中用于关联页面解析结果、过滤无关内�
 C2D-XML。本阶段先把它作为独立的单图 VLM Worker 验证，不与 PaddleOCR-VL 同时
 常驻，也不把原始模型输出视为已经通过 C2D-XML 校验的文档。
 
-2026-09-05 流程边界补充：文档冻结 ordered_image_ids、所需 OCR 结果齐备后才调用 Qwen；程序串行提供确认顺序中的图片，不按 OCR 回调顺序处理。本轮 [本地 CLI](server_pipeline.md) 已连接模型调用、完整 system prompt、动态预算、XML 续写与恢复，真实 GPU 联调待执行；不能继承此前独立 Worker 的质量验证结论。
+2026-09-05 流程边界补充：目标调度在服务端接受最终页面集合、顺序与不可变内容引用，且所需 OCR 结果齐备后才调用 Qwen。Android 可离线先拍摄和完成本地页序冻结；这不触发 Qwen，须待真实文档 ID、1280 派生图上传和会话提交完成。模型遵循用户确认页序恢复跨页结构，不按上传/OCR 回调顺序处理，也不自行重排采集页。服务端本地 CLI 已连接 Paddle → Qwen 串行推理、完整提示词、真实 token 预算、XML 组装与原子检查点恢复。上游记录单张真实照片 GPU 闭环、完成后恢复及 SIGTERM 中断续跑通过；多图、内容/样式质量仍待扩展，不能等同于 Android HTTP 联通。详见 [服务端 Pipeline](server_pipeline.md)。 独立 Worker 的参数实验与 CLI 验证分别记录，见 [扫描 Pipeline](capture_pipeline.md) 和 [XML 增量组装](c2d_xml_assembly.md)。
 
 ## 当前配置
 

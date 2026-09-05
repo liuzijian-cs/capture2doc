@@ -1,6 +1,8 @@
 # Android 开发环境
 
-> 状态：开发环境与既有 CameraX 真机基线已通过；2026-09-04 相机页 UI 已实现且最终本地构建检查通过，新 UI 真机验收待执行
+> 本轮任务首页迁移见 [任务首页](android_task_home.md) 和 [客户端协议提案](android_task_protocol.md)。移除重拍和必经整理网格，完成直接回首页；普通页面固定蓝白，相机蓝黑。下文旧导航与单草稿测试描述属于相机基线，新任务流程须单独验收。
+
+> 状态：开发环境与既有 CameraX 真机基线已通过；2026-09-05 当前离线版本本地回归及用户真机人工测试通过，新版设备自动化和跨端专项待执行
 > 流程与构建结果核对：2026-09-05；工具链环境沿用既有 macOS / Apple Silicon 记录
 
 本文档集中记录 Capture2Doc Android 工程的工具链版本、本机环境、首次初始化、构建和真机调试步骤。具体依赖版本仍以 [`android/gradle/libs.versions.toml`](../android/gradle/libs.versions.toml) 和 [`android/app/build.gradle.kts`](../android/app/build.gradle.kts) 为准。
@@ -54,9 +56,9 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 | `:app:testDebugUnitTest` | 最终修复后通过，包含尺寸计算与完成门槛测试 |
 | `:app:lintDebug` | 最终修复后通过，已生成 HTML 报告 |
 | `:app:assembleDebugAndroidTest` | 最终修复后通过，已生成设备测试 APK |
-| Android 真机 | 改造前的低延迟 Debug APK 已安装并冷启动成功；本轮未执行新 UI 真机验收 |
+| Android 真机 | 既有基线保留；2026-09-05 用户部署当前离线版本并确认人工测试通过 |
 | CameraX 真机验证 | 改造前的功能、连续拍摄、方向、对焦、文件输出与性能验收均通过 |
-| `:app:connectedDebugAndroidTest` | 改造前 8 个测试通过；截至本轮记录，新 UI 未执行 |
+| `:app:connectedDebugAndroidTest` | 改造前 8 个测试通过；当前新版设备自动化未执行；人工通过不等于该命令通过 |
 
 既有环境记录中的缺项与限制（不是实时安装状态）：
 
@@ -64,7 +66,7 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 - 暂未建立模拟器测试矩阵；
 - CameraX 低延迟连续拍照探针已通过构建、自动化连接测试和完整真机验收。
 
-稳定 viewport、overlay 候选条与底部控件已实现，四项本地检查成功。新 UI 连接测试与真机验收尚无本轮执行结果，后续按 [Android 相机测试与验收](android_camera_testing.md) 的新增清单验证。设备是否在线以当次 `adb devices -l` 为准。
+稳定 viewport、overlay 候选条与底部控件已实现，四项本地检查成功。2026-09-05 用户确认当前离线版本真机人工测试通过；新版连接自动化及剩余专项仍按 [Android 相机测试与验收](android_camera_testing.md) 的新增清单验证。设备是否在线以当次 `adb devices -l` 为准。
 
 项目当前优先使用 Android 真机验证，因此不要求先下载模拟器 system image。
 
@@ -135,10 +137,10 @@ sdk.dir=/Users/zane/Library/Android/sdk
 1. 打开仓库 `android/` 工程并等待 Gradle Sync 完成。
 2. 打开 [CameraProbeScreen.kt](../android/app/src/main/kotlin/io/github/liuzijiancs/capture2doc/feature/capture2doc/camera/CameraProbeScreen.kt)，切换编辑器的 Split 或 Design；需要时点击 Build & Refresh。
 3. 对照 `Camera empty / saving / pages / failure / dark / landscape` 示例，检查快门居中、候选位置、空态与多页状态下取景框不跳变。
-4. 打开 [ScanDraftScreen.kt](../android/app/src/main/kotlin/io/github/liuzijiancs/capture2doc/feature/capture2doc/draft/ScanDraftScreen.kt)，查看 `01 网格 - 浅色` 至 `06 恢复占位` 六个 Preview，讨论网格、大图、删除确认、空草稿及失败占位。
+4. 打开 [HomeScreen.kt](../android/app/src/main/kotlin/io/github/liuzijiancs/capture2doc/ui/home/HomeScreen.kt)，查看 `Tasks / Tasks large font / Tasks empty / Create failed`，讨论列表、状态、搜索、左滑与多选。旧整理页 Preview 已移除。
 5. 可用交互模式检查原型支持的点击和拖拽；记录不满意的布局、状态与预期交互，作为下一轮 UI 修改输入。
 
-相机 Preview 使用示例状态和模拟取景背景，不会启动真实 CameraX；整理原型也不代表 Repository 实际写盘。Preview 构建成功不能证明真实快门、草稿恢复或网络链路成功。VS Code 可继续编辑源码，现有 Compose 原型在 Android Studio 中查看。
+相机 Preview 使用示例状态和模拟取景背景，不会启动真实 CameraX；任务首页预览也不代表实际创建或上传。Preview 构建成功不能证明真实快门、草稿恢复或网络链路成功。VS Code 可继续编辑源码，现有 Compose 原型在 Android Studio 中查看。
 
 ## 构建与检查命令
 
@@ -193,17 +195,17 @@ app/build/outputs/apk/debug/app-debug.apk
 -n io.github.liuzijiancs.capture2doc/.MainActivity
 ```
 
-首轮真机检查至少覆盖：冷启动、浅色/深色模式、横竖屏切换、返回手势和字体缩放。相机流程还需覆盖权限拒绝与重新授权、横竖屏拍照、切入后台、连续拍摄、结果尺寸，以及候选点按大图、双击删除、长按排序和“完成”进入本地整理页，详细清单见 [Android 相机测试与验收](android_camera_testing.md)。
+专项真机检查覆盖：冷启动、业务页蓝白/相机蓝黑、横竖屏切换、返回手势和字体缩放。相机流程还需覆盖权限拒绝与重新授权、横竖屏拍照、切入后台、连续拍摄、结果尺寸、未连接提示、候选点按大图、双击删除、长按排序，以及“完成”冻结本地页序并直接回任务首页。用户本次人工通过不代替未单独记录的专项，详见 [Android 相机测试与验收](android_camera_testing.md)。
 
-改造前的 4:3 低延迟 CameraX Debug APK 已在 Android 真机上完成冷启动、权限说明、后置摄像头绑定、8 个自动化连接测试，以及真实快门、近远点对焦、横竖屏与反向方向、1280 像素 OCR 派生图核对和 20 张性能验收。实际拍摄分辨率和 postview 支持情况仍由运行时能力决定；2026-09-04 实现的新相机 UI 尚未进行这轮真机验收。
+改造前的 4:3 低延迟 CameraX Debug APK 已在 Android 真机上完成冷启动、权限说明、后置摄像头绑定、8 个自动化连接测试，以及真实快门、近远点对焦、横竖屏与反向方向、1280 像素 OCR 派生图核对和 20 张性能验收。实际拍摄分辨率和 postview 支持情况仍由运行时能力决定；2026-09-05 用户已部署当前离线拍摄版本并确认人工测试通过；本轮未重新统计性能或执行设备自动化。
 
-上述人工基线按用户确认记录通过，本轮没有补录原始性能统计。新 UI 和未来 [联网 Pipeline](capture_pipeline.md) 分阶段验收，不能继承旧基线的通过结论。
+上述人工基线按用户确认记录通过，本轮没有补录原始性能统计。当前离线 UI 的通过结论来自本次用户反馈；未来 [联网 Pipeline](capture_pipeline.md) 和恢复专项独立验收，不继承该结论。
 
 ### 通过 Android Studio 部署
 
 USB 调试授权完成后，在顶部运行配置选择 `app`，设备列表选择已连接真机，点击主工具栏绿色 Run 按钮。Android Studio 会构建、安装并启动 App；不要将 Preview 自身的 Run Preview 当作完整 App 导航验证入口。手机保持解锁，首次进入扫描工具时按提示授权相机。流程依据见 [Android 官方真机运行说明](https://developer.android.com/studio/run/device)。
 
-若构建失败，先在 Build 输出查看首个编译错误；若安装失败，核对设备授权和连接。首次打开仍是当前临时宿主首页，从扫描入口进入相机；现有草稿会弹出继续/放弃选项。当前点击相机“完成”进入本地整理页，未部署聊天服务或 Gradio 不影响该流程。
+若构建失败，先在 Build 输出查看首个编译错误；若安装失败，核对设备授权和连接。首次打开是任务列表首页；点击已有草稿续拍，点击加号先建立本地任务并进入相机；未连接服务时持续提示，但不阻止拍摄。完成直接回首页，后台继续。Gradio 和聊天服务不是本地拍摄的依赖；上传需要符合 v1 提案的文档 API。未接入服务也可真机验证拍摄、保存和本地完成。
 
 ### 相机权限复测
 
@@ -257,3 +259,17 @@ io.github.liuzijiancs.capture2doc ls -lh files/scan_draft/pages
 - 升级 AGP、Gradle、Kotlin、Compose 或 SDK 时，应同时更新版本目录、构建文件和本文档。
 - 工程以 Gradle Wrapper 作为构建入口，避免不同开发机使用不同的系统 Gradle。
 - 单台真机测试不能替代 API 26 以上不同厂商、摄像头能力和屏幕尺寸的兼容性验证。
+
+离线界面可直接查看 `Camera offline`、`Camera offline large font` 和 `Tasks offline` Preview。真机不配置服务也可以拍照：点击首页加号，授权相机后拍摄；检查顶部未连接浮层、候选条、保存返回及完成返回。照片只保存在本地，不依赖 Gradio。
+
+## 本轮服务配置与验收边界
+
+默认服务地址为空，新建可进入相机并持续显示未连接，照片及页序保存在本地；不会伪造上传或 OCR 成功。服务端按 [v1 客户端提案](android_task_protocol.md) 提供接口后，在本机 Gradle 用户属性或命令行传入 `capture2doc.baseUrl`，例如：
+
+```bash
+./gradlew :app:assembleDebug -Pcapture2doc.baseUrl=http://192.168.1.10:8000
+```
+
+示例地址仅为占位，请替换为真机可访问的开发服务地址。Debug 允许开发 HTTP，Release 仅 HTTPS；当前没有账号鉴权，不用于公网部署。地址写入 BuildConfig，新任务记录创建时端点，已有非空端点的旧任务不会随配置切到另一服务；离线新建且端点为空的任务，在配置服务并重新打开 App 后首次绑定，再关联真实文档 ID。不要提交凭据或把本机配置写入仓库。
+
+本轮离线修订已执行 Android 四项回归。用户已通过 Android Studio 部署当前离线版本并确认人工测试通过；connectedDebugAndroidTest 本轮仍未执行。详细测试计数见 [任务首页](android_task_home.md#本轮实现记录)。

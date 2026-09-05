@@ -2,238 +2,91 @@ package io.github.liuzijiancs.capture2doc
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraProbeRoute
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraProbeViewModel
-import io.github.liuzijiancs.capture2doc.feature.capture2doc.draft.ScanDraftRoute
-import io.github.liuzijiancs.capture2doc.feature.capture2doc.draft.ScanDraftViewModel
-import io.github.liuzijiancs.capture2doc.ui.home.HomeScreen
-
-private enum class AppDestination {
-    HOME,
-    CAMERA_PROBE,
-    DRAFT_REVIEW,
-}
+import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.countsAgainstCaptureLimit
+import io.github.liuzijiancs.capture2doc.ui.home.*
+import io.github.liuzijiancs.capture2doc.ui.theme.Capture2DocTheme
 
 @Composable
 fun Capture2DocApp() {
-    val snackbarHostState = remember { SnackbarHostState() }
-    var destinationName by rememberSaveable { mutableStateOf(AppDestination.HOME.name) }
-    val destination = AppDestination.valueOf(destinationName)
-    val draftViewModel: ScanDraftViewModel = viewModel()
-    val cameraViewModel: CameraProbeViewModel = viewModel()
-    val draftState by draftViewModel.uiState.collectAsStateWithLifecycle()
-    val cameraState by cameraViewModel.uiState.collectAsStateWithLifecycle()
-    var pendingRetakePageId by rememberSaveable { mutableStateOf<String?>(null) }
-    var showContinueDraftDialog by rememberSaveable { mutableStateOf(false) }
-    var showExitDraftDialog by rememberSaveable { mutableStateOf(false) }
-    var startScanWhenDraftLoaded by rememberSaveable { mutableStateOf(false) }
+    val model: TaskHomeViewModel = viewModel()
+    val state by model.state.collectAsStateWithLifecycle()
+    val tasks by model.tasks.collectAsStateWithLifecycle()
+    val networkAvailable by model.networkAvailable.collectAsStateWithLifecycle()
+    val displayedTasks = if (networkAvailable) tasks else tasks.map { it.copy(connectionIssue = "网络未连接") }
+    val app = LocalContext.current.applicationContext as Capture2DocApplication
+    val active = displayedTasks.firstOrNull { it.taskId == state.activeTaskId }
+    var exitDialog by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        draftViewModel.refreshDraft()
-    }
-
-    fun navigateToHomeFromDraft() {
-        if (draftState.draft?.pages.orEmpty().isEmpty()) {
-            draftViewModel.discardDraft()
-        }
-        destinationName = AppDestination.HOME.name
-        pendingRetakePageId = null
-        showExitDraftDialog = false
-    }
-
-    fun requestDraftExit() {
-        if (draftState.draft?.pages.orEmpty().isNotEmpty()) {
-            showExitDraftDialog = true
-        } else {
-            navigateToHomeFromDraft()
-        }
-    }
-
-    fun openScanEntry() {
-        if (draftState.draft?.pages.orEmpty().isNotEmpty()) {
-            showContinueDraftDialog = true
-        } else {
-            pendingRetakePageId = null
-            destinationName = AppDestination.CAMERA_PROBE.name
-        }
-    }
-
-    fun onStartScan() {
-        if (draftState.isLoading) {
-            startScanWhenDraftLoaded = true
-        } else {
-            openScanEntry()
-        }
-    }
-
-    LaunchedEffect(draftState.isLoading, startScanWhenDraftLoaded) {
-        if (startScanWhenDraftLoaded && !draftState.isLoading) {
-            startScanWhenDraftLoaded = false
-            openScanEntry()
-        }
-    }
-
-    if (showContinueDraftDialog) {
-        AlertDialog(
-            onDismissRequest = { showContinueDraftDialog = false },
-            title = { Text("检测到本地草稿") },
-            text = { Text("检测到未完成草稿。选择“继续草稿”进入页面整理，或者“放弃并新建”重新开始拍照。") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showContinueDraftDialog = false
-                        destinationName = AppDestination.DRAFT_REVIEW.name
+    when {
+        state.destination == TaskDestination.CAMERA && active != null -> {
+            val factory = remember(active.taskId) {
+                object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                        CameraProbeViewModel(app, model.repository.draftRepository(active.taskId)) as T
+                }
+            }
+            val camera: CameraProbeViewModel = viewModel(key = "camera-${active.taskId}", factory = factory)
+            val cameraState by camera.uiState.collectAsStateWithLifecycle()
+            LaunchedEffect(state.busy) { camera.setWorkflowBlocked(state.busy) }
+            Capture2DocTheme(darkTheme = true) {
+                CameraProbeRoute(
+                    onBack = { if (!state.busy) exitDialog = true },
+                    onDraftReady = {
+                        if (!state.busy) {
+                            // Close the shutter gate synchronously, before the next composition.
+                            camera.setWorkflowBlocked(true)
+                            model.finishTask()
+                        }
                     },
-                ) {
-                    Text("继续草稿")
-                }
-            },
-            dismissButton = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            showContinueDraftDialog = false
-                            draftViewModel.discardDraft {
-                                pendingRetakePageId = null
-                                destinationName = AppDestination.CAMERA_PROBE.name
+                    interactionsEnabled = !state.busy && !exitDialog,
+                    disconnected = active.isDisconnected,
+                    viewModel = camera,
+                )
+                if (exitDialog) {
+                    val safeToExit = cameraState.captureJobs.none { it.stage.countsAgainstCaptureLimit }
+                    AlertDialog(
+                        onDismissRequest = { if (!state.busy) exitDialog = false },
+                        title = { Text("保存草稿？") },
+                        text = { Text(if (safeToExit) "保存后可从首页继续拍摄。选择移除时，仅从本机列表移除，后台上传和处理仍会继续。" else "正在保存照片，请稍候。") },
+                        confirmButton = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(enabled = safeToExit && !state.busy, onClick = { exitDialog = false; model.goHome() }) { Text("保存并退出") }
+                                TextButton(enabled = safeToExit && !state.busy, onClick = {
+                                    exitDialog = false; model.hideTasks(setOf(active.taskId))
+                                }) { Text("仅从本机列表移除") }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("放弃并新建")
-                    }
-                    TextButton(
-                        onClick = { showContinueDraftDialog = false },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("取消")
-                    }
+                        dismissButton = { TextButton(onClick = { exitDialog = false }) { Text("继续拍摄") } },
+                    )
                 }
-            },
-        )
+            }
+        }
+        state.destination == TaskDestination.DETAIL && active != null -> Capture2DocTheme(darkTheme = false) {
+            TaskDetailScreen(active, model::goHome, { model.retryTask(active.taskId) })
+        }
+        else -> Capture2DocTheme(darkTheme = false) {
+            HomeScreen(displayedTasks, model::createTask, model::openTask, model::hideTasks,
+                disconnected = !networkAvailable || BuildConfig.SERVICE_BASE_URL.isBlank(),
+                busy = state.busy, error = state.error, onRetry = model::retry)
+        }
     }
-
-    if (showExitDraftDialog) {
-        AlertDialog(
-            onDismissRequest = { showExitDraftDialog = false },
-            title = { Text("草稿未完成") },
-            text = { Text("当前草稿尚未上传。保存后可返回继续编辑。") },
-            confirmButton = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = {
-                            showExitDraftDialog = false
-                            navigateToHomeFromDraft()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("保存并退出")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            showExitDraftDialog = false
-                            draftViewModel.discardDraft {
-                                destinationName = AppDestination.HOME.name
-                                pendingRetakePageId = null
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("放弃草稿")
-                    }
-                    TextButton(
-                        onClick = {
-                            showExitDraftDialog = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("继续编辑")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showExitDraftDialog = false },
-                ) {
-                    Text("取消")
-                }
-            },
-        )
-    }
-
-    when (destination) {
-        AppDestination.HOME -> HomeScreen(
-            snackbarHostState = snackbarHostState,
-            onStartScan = { onStartScan() },
-        )
-
-        AppDestination.CAMERA_PROBE -> CameraProbeRoute(
-            onBack = { hasAcceptedCaptureOrPage ->
-                pendingRetakePageId = null
-                if (
-                    hasAcceptedCaptureOrPage ||
-                    draftState.draft?.pages.orEmpty().isNotEmpty()
-                ) {
-                    destinationName = AppDestination.DRAFT_REVIEW.name
-                } else {
-                    navigateToHomeFromDraft()
-                }
-            },
-            onDraftReady = {
-                pendingRetakePageId = null
-                destinationName = AppDestination.DRAFT_REVIEW.name
-            },
-            retakePageId = pendingRetakePageId,
-            viewModel = cameraViewModel,
-        )
-
-        AppDestination.DRAFT_REVIEW -> ScanDraftRoute(
-            onBackToHome = { requestDraftExit() },
-            onSaveAndExit = { navigateToHomeFromDraft() },
-            onContinueCapture = {
-                pendingRetakePageId = null
-                destinationName = AppDestination.CAMERA_PROBE.name
-            },
-            onRetake = { pageId ->
-                cameraViewModel.prepareRetake(pageId) { prepared ->
-                    if (
-                        prepared &&
-                        destinationName == AppDestination.DRAFT_REVIEW.name
-                    ) {
-                        pendingRetakePageId = pageId
-                        destinationName = AppDestination.CAMERA_PROBE.name
-                    }
-                }
-            },
-            retakePreparationInProgress = cameraState.retakePreparationInProgress,
-            viewModel = draftViewModel,
-        )
-    }
+    if (state.error != null && state.destination != TaskDestination.HOME) AlertDialog(
+        onDismissRequest = model::clearError, title = { Text("操作未完成") }, text = { Text(state.error.orEmpty()) },
+        confirmButton = { TextButton(onClick = model::retry) { Text("重试") } },
+        dismissButton = { TextButton(onClick = model::clearError) { Text("关闭") } },
+    )
 }

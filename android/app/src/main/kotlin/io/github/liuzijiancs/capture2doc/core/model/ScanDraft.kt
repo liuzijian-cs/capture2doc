@@ -1,7 +1,7 @@
 package io.github.liuzijiancs.capture2doc.core.model
 
 internal const val SCAN_DRAFT_SCHEMA_VERSION = 1
-internal const val SCAN_PAGE_INVALID_ORIGINAL_MESSAGE = "原图缺失或损坏，请重拍"
+internal const val SCAN_PAGE_INVALID_ORIGINAL_MESSAGE = "原图缺失或损坏，请删除后重新拍摄"
 
 internal enum class ScanPageState {
     CAPTURING,

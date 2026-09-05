@@ -78,6 +78,19 @@ class CameraCandidateStateTest {
         assertTrue(recovering.copy(draftReady = true).canFinish)
     }
 
+    @Test
+    fun submissionGateBlocksShutterAndDuplicateFinish() {
+        val state = CameraProbeUiState(
+            gate = CameraGateState.Ready,
+            draftReady = true,
+            candidates = listOf(candidate("page", ScanPageState.READY, hasSafeOriginal = true)),
+        )
+        assertTrue(state.canCapture)
+        assertTrue(state.canFinish)
+        assertFalse(state.copy(workflowBlocked = true).canCapture)
+        assertFalse(state.copy(workflowBlocked = true).canFinish)
+    }
+
     private fun candidate(
         pageId: String,
         state: ScanPageState,

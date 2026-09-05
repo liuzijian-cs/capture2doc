@@ -4,7 +4,7 @@
 
 ## 输入和运行
 
-以 `document_id` 归属不可变的 `image_id`，没有新增服务端 `page_id`。重拍创建新 image_id。用户最终确认的 `ordered_image_ids` 决定请求及提交顺序；一张图片是一批输入，一批可生成多个语义 block。Android 上传、HTTP 服务和跨文档实时队列仍未接入。
+以 `document_id` 归属不可变的 `image_id`，没有新增服务端 `page_id`。当前 Android 已移除重拍；删除后重新拍摄会创建新的图片身份。用户最终确认的 `ordered_image_ids` 决定请求及提交顺序；一张图片是一批输入，一批可生成多个语义 block。Android 已实现离线任务首页、HTTP 适配器和 WorkManager；其 pageId/pageIds 拟映射不可变 image_id/ordered_image_ids，见 [跨端协议提案](android_task_protocol.md)。服务端 HTTP 接收和跨文档实时队列仍未接入，CLI 不代表端到端上传已联通。
 
 在 NVIDIA/WSL 的 `server/` 目录执行。两个模型必须已准备成本地快照；CLI 不下载模型。
 

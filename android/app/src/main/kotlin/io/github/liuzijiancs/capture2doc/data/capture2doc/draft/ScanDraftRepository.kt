@@ -28,6 +28,8 @@ internal class ScanDraftRepository(
     filesDirectory: File,
     private val imageNormalizer: ImageNormalizer = ImageNormalizer(),
     private val now: () -> Long = System::currentTimeMillis,
+    private val keepEmptyDraft: Boolean = false,
+    private val preserveUnreadable: Boolean = false,
 ) {
     private val rootDirectory = File(filesDirectory, ROOT_DIRECTORY_NAME)
     private val pagesDirectory = File(rootDirectory, PAGES_DIRECTORY_NAME)
@@ -193,28 +195,6 @@ internal class ScanDraftRepository(
 
     fun isOriginalKnownValid(pageId: String): Boolean = pageId in validOriginalPageIds
 
-    suspend fun prepareRetake(pageId: String): Boolean = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            ensureInitializedLocked()
-            val current = _draft.value ?: return@withLock false
-            val index = current.pages.indexOfFirst { it.pageId == pageId }
-            if (index < 0) return@withLock false
-            if (current.pages[index].state == ScanPageState.CAPTURING) return@withLock false
-            normalizationMutex.withLock {
-                val pages = current.pages.toMutableList().apply {
-                    this[index] = this[index].copy(
-                        state = ScanPageState.RETAKE_REQUIRED,
-                        errorMessage = "等待重新拍摄",
-                    )
-                }
-                updateDraftLocked(current, pages)
-                validOriginalPageIds -= pageId
-                File(pageFiles(pageId).directoryPath).deleteRecursively()
-                true
-            }
-        }
-    }
-
     suspend fun deletePage(pageId: String): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
             ensureInitializedLocked()
@@ -325,11 +305,15 @@ internal class ScanDraftRepository(
         val loaded = try {
             readManifest()
         } catch (error: Exception) {
+            if (preserveUnreadable) throw error
             _errorMessage.value = "无法读取本地扫描草稿：${error.message ?: "文件已损坏"}"
             null
         }
 
-        if (loaded == null || loaded.pages.isEmpty()) {
+        if (loaded == null && preserveUnreadable && pagesDirectory.listFiles().orEmpty().isNotEmpty()) {
+            error("页面清单缺失，保留图片等待恢复")
+        }
+        if (loaded == null || (loaded.pages.isEmpty() && !keepEmptyDraft)) {
             // Without a usable manifest no page directory can be proven to belong to a draft.
             // Clearing only the dedicated scan_draft scope also removes files left by a crash
             // without touching legacy files/captures content.
@@ -371,7 +355,10 @@ internal class ScanDraftRepository(
     }
 
     private suspend fun recoverPage(page: ScanPage): ScanPage {
-        if (page.state == ScanPageState.RETAKE_REQUIRED) return page
+        if (page.state == ScanPageState.RETAKE_REQUIRED) return page.copy(
+            state = ScanPageState.FAILED,
+            errorMessage = "旧重拍已中断，请删除此页后重新拍摄",
+        )
         val original = resolve(page.originalRelativePath)
         val normalized = resolve(page.normalizedRelativePath)
         val originalValid = isDecodable(original)
@@ -461,7 +448,7 @@ internal class ScanDraftRepository(
     }
 
     private fun readManifest(): ScanDraft? {
-        if (!manifestFile.baseFile.isFile) return null
+        if (!manifestFile.baseFile.isFile && !File(manifestFile.baseFile.path + ".bak").isFile) return null
         val json = manifestFile.openRead().use { input ->
             input.readBytes().toString(StandardCharsets.UTF_8)
         }
@@ -545,7 +532,7 @@ internal class ScanDraftRepository(
         "$PAGES_DIRECTORY_NAME/$pageId/$NORMALIZED_FILE_NAME"
 
     private fun validatePageId(pageId: String) {
-        require(pageId.isNotBlank() && '/' !in pageId && '\\' !in pageId) {
+        require(pageId.isNotBlank() && pageId != "." && pageId != ".." && '/' !in pageId && '\\' !in pageId) {
             "无效的页面 ID"
         }
     }

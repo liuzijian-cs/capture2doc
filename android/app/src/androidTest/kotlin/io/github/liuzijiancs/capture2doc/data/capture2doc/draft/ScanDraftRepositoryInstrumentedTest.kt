@@ -152,7 +152,7 @@ class ScanDraftRepositoryInstrumentedTest {
     }
 
     @Test
-    fun pageOrderAndRetakePlaceholderPersistAcrossRepositoryRecreation() = runBlocking {
+    fun legacyRetakePlaceholderMigratesToFailureWithoutChangingOrder() = runBlocking {
         val filesDirectory = newTestFilesDirectory()
         try {
             val writer = ScanDraftRepository(filesDirectory)
@@ -164,17 +164,16 @@ class ScanDraftRepositoryInstrumentedTest {
             createJpeg(File(second.originalPath))
             createJpeg(File(third.originalPath))
             assertTrue(writer.movePage(pageId = "page-three", targetIndex = 0))
-            assertFalse(writer.prepareRetake("page-two"))
-            writer.markNormalizing("page-two")
-            writer.markReady("page-two")
-            assertTrue(writer.prepareRetake("page-two"))
-            writer.markReady("page-two")
-            writer.markFailed("page-two", "late callback")
-            assertFalse(File(second.directoryPath).exists())
-            assertEquals(
-                ScanPageState.RETAKE_REQUIRED,
-                writer.draft.value?.pages?.first { it.pageId == "page-two" }?.state,
-            )
+            // Construct an old-version fixture; production no longer exposes retake.
+            val manifest = File(filesDirectory, "scan_draft/draft.json")
+            val json = org.json.JSONObject(manifest.readText())
+            val oldPages = json.getJSONArray("pages")
+            repeat(oldPages.length()) { index ->
+                val page = oldPages.getJSONObject(index)
+                if (page.getString("pageId") == "page-two") page.put("state", "RETAKE_REQUIRED")
+            }
+            manifest.writeText(json.toString())
+            File(second.directoryPath).deleteRecursively()
 
             val reloaded = ScanDraftRepository(filesDirectory)
             val recovered = reloaded.ensureDraft()
@@ -183,7 +182,7 @@ class ScanDraftRepositoryInstrumentedTest {
                 listOf("page-three", "page-one", "page-two"),
                 recovered.pages.map { it.pageId },
             )
-            assertEquals(ScanPageState.RETAKE_REQUIRED, recovered.pages[2].state)
+            assertEquals(ScanPageState.FAILED, recovered.pages[2].state)
             assertFalse(File(second.directoryPath).exists())
         } finally {
             filesDirectory.deleteRecursively()
