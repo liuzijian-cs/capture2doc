@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import time
 from copy import deepcopy
+from dataclasses import asdict
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 from xml.etree import ElementTree
 
-from capture2doc.formats.c2d_xml import C2DAssembler
+from capture2doc.formats.c2d_xml import C2DAssembler, ValidationResult
 from capture2doc.prompts import c2d_system_prompt, prompt_fingerprint
 
 from .models import verify_previous_cleanup
@@ -30,6 +31,33 @@ class PipelineError(RuntimeError):
 def finish_reason(result: Any) -> str | None:
     choices = result.raw_response.get("choices", [])
     return choices[0].get("finish_reason") if choices else None
+
+
+def validation_feedback(validation: ValidationResult) -> list[str]:
+    """Keep validator locations and make structural repairs actionable."""
+    errors = []
+    for issue in validation.issues[:12]:
+        location = []
+        if issue.xpath:
+            location.append(f"xpath={issue.xpath}")
+        if issue.block_index is not None:
+            location.append(f"block_index_zero_based={issue.block_index}")
+        if issue.line is not None:
+            location.append(f"line={issue.line}")
+        message = f"{issue.code}: {issue.message}"
+        if location:
+            message += " [" + ", ".join(location) + "]"
+        if issue.code == "SCHEMAV_ELEMENT_CONTENT" and "}pre'" in issue.message:
+            message += (
+                " REPAIR: <pre><code>...</code></pre> must be a direct child of "
+                "<c2d-update>. It cannot be inside blockquote, p, li or a table cell. "
+                "Split the enclosing container around the pre and emit complete "
+                "sibling blocks in reading order, preserving all code text and whitespace. "
+                "A blockquote can contain only p, ul, ol and blockquote. "
+                "Do not delete code to satisfy the schema."
+            )
+        errors.append(message)
+    return errors
 
 
 def xml_text(xml: str) -> str:
@@ -484,7 +512,7 @@ def _run_round(
                 )
             candidate = deepcopy(assembler)
             validation = candidate.apply_update(result.content)
-            errors = [f"{i.code}: {i.message}" for i in validation.issues][:12]
+            errors = validation_feedback(validation)
             report: dict[str, Any] = {}
             if validation.valid:
                 report, errors = content_check(result.content, tail, ocr[start:end])
@@ -492,6 +520,7 @@ def _run_round(
                 f"{prefix}/validation.json",
                 {
                     "xml_valid": validation.valid,
+                    "validation_issues": [asdict(i) for i in validation.issues],
                     "errors": errors,
                     "content_check": report,
                 },

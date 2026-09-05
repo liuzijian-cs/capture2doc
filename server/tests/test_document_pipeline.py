@@ -234,6 +234,30 @@ def test_invalid_xml_repair_uses_unchanged_tail(tmp_path: Path) -> None:
     )
 
 
+def test_nested_pre_repair_keeps_location_code_and_previous_tail(tmp_path: Path) -> None:
+    texts = {"a": "alpha", "b": "beta\n  gamma"}
+    store, _ = document(tmp_path, texts)
+    invalid = update(
+        "<p>alpha</p><blockquote><pre><code>beta\n  gamma</code></pre></blockquote>"
+    )
+    repaired = update("<p>alpha</p><pre><code>beta\n  gamma</code></pre>")
+    models = FakeModels(texts, actions=[None, response(invalid), response(repaired)])
+    output = run(store, models)
+    feedback = "\n".join(models.requests[2]["retry_errors"])
+    assert "xpath=" in feedback
+    assert "block_index_zero_based=1" in feedback
+    assert "direct child" in feedback and "Do not delete code" in feedback
+    assert models.requests[2]["previous_response"] == invalid
+    assert models.requests[1]["mutable_tail"] == models.requests[2]["mutable_tail"]
+    attempt = store.state["attempts"][1]
+    report = json.loads((store.root / attempt["validation_ref"]).read_text())
+    assert report["validation_issues"][0]["block_index"] == 1
+    assert report["validation_issues"][0]["xpath"]
+    final = ElementTree.fromstring(output.read_bytes())
+    assert len(final) == 2 and len(store.state["rounds"]) == 2
+    assert final[1][0].text == "beta\n  gamma"
+
+
 def test_interruption_reuses_ocr_and_does_not_reapply_committed_round(
     tmp_path: Path,
 ) -> None:
