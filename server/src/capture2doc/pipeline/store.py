@@ -82,6 +82,8 @@ class DocumentStore:
     Uncommitted artifacts are evidence only and are never replayed as updates.
     """
 
+    schema_version = 1
+
     def __init__(self, root: Path):
         self.root = root.expanduser().resolve()
         self.state_path = self.root / "state.json"
@@ -89,7 +91,7 @@ class DocumentStore:
 
     def load(self) -> None:
         self.state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        if self.state.get("schema_version") != 1:
+        if self.state.get("schema_version") != self.schema_version:
             raise ValueError("Unsupported document checkpoint version")
         self.verify_images()
 
@@ -161,7 +163,7 @@ class DocumentStore:
                 raise ValueError(f"Conflicting immutable image: {target}")
             atomic_write(target, data)
         self.state = {
-            "schema_version": 1,
+            "schema_version": self.schema_version,
             "document_id": document_id,
             "lang": lang,
             "ordered_image_ids": order,

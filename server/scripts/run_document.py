@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from capture2doc.pipeline.models import LocalModels
+from capture2doc.pipeline.document import BlockStore, run_document_v2
 from capture2doc.pipeline.runner import run_document
 from capture2doc.pipeline.store import DocumentStore, exclusive_lock
 
@@ -24,6 +25,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     source.add_argument(
         "--resume", action="store_true", help="Resume from output-dir/state.json"
+    )
+    parser.add_argument(
+        "--reuse-ocr-from",
+        type=Path,
+        help="V2 only: import successful OCR after checking image/model/config identities",
     )
     parser.add_argument(
         "--output-dir", type=Path, required=True, help="Dedicated document directory"
@@ -50,7 +56,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    store = DocumentStore(args.output_dir)
+    state_path = args.output_dir / "state.json"
+    version = (
+        json.loads(state_path.read_text()).get("schema_version")
+        if state_path.exists()
+        else 2
+    )
+    store = (
+        DocumentStore(args.output_dir) if version == 1 else BlockStore(args.output_dir)
+    )
 
     def interrupted(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt("termination requested")
@@ -63,14 +77,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 store.create(args.manifest)
             with exclusive_lock(args.gpu_lock):
-                output = run_document(
-                    store,
-                    LocalModels(cache_dir=args.cache_dir, host=args.host),
-                    retry_failed=args.retry_failed,
-                    progress=lambda message: print(
-                        message, file=sys.stderr, flush=True
-                    ),
-                )
+                models = LocalModels(cache_dir=args.cache_dir, host=args.host)
+
+                def progress(message: str) -> None:
+                    print(message, file=sys.stderr, flush=True)
+
+                if version == 2:
+                    if args.retry_failed:
+                        raise ValueError(
+                            "V2 repair budgets cannot be reset with --retry-failed"
+                        )
+                    output = run_document_v2(
+                        store,
+                        models,
+                        reuse_ocr_from=args.reuse_ocr_from,
+                        progress=progress,
+                    )
+                else:
+                    if args.reuse_ocr_from:
+                        raise ValueError(
+                            "Use a new V2 output directory to import legacy OCR"
+                        )
+                    output = run_document(
+                        store, models, retry_failed=args.retry_failed, progress=progress
+                    )
             print(
                 json.dumps(
                     {
@@ -78,12 +108,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "status": store.state["status"],
                         "output": str(output),
                         "rounds": len(store.state["rounds"]),
+                        "blocks": len(store.state.get("blocks", [])),
                         "semantic_fidelity_verified": False,
                     },
                     ensure_ascii=False,
                 )
             )
-            return 3 if store.state["status"] == "needs_review" else 0
+            review = store.state["status"] == "needs_review"
+            if version == 2:
+                review = json.loads(output.read_text())["doc"]["needs_review"]
+            return 3 if review else 0
     except KeyboardInterrupt:
         print("Interrupted; durable checkpoint retained.", file=sys.stderr)
         return 130

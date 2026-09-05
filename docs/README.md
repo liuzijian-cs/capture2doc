@@ -6,7 +6,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 
 ## 文档索引
 
-- [手机图片到 C2D-XML：本地 CLI](server_pipeline.md)：本轮文档/image_id 契约、单并发模型轮换、完整提示词、动态尾块预算、故障恢复与真实 GPU 验收边界。
+- [手机图片到 C2D-XML：本地 CLI](server_pipeline.md)：V2 文档 JSON、五轮分块修复、局部兜底、只读历史、单并发模型轮换与真实 GPU 验收。
 
 - [Android 开发成果、设计演变与后续计划](android_progress_and_plan.md)：本轮完整成果、旧方案对照、提交与验证证据、原型入口和后续依赖。
 - [扫描 Pipeline](capture_pipeline.md)：本地与联网流程、逐页上传/OCR、最终输入冻结、重拍版本、乱序和恢复边界；跨端流程统一依据。

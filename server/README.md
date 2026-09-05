@@ -2,9 +2,9 @@
 
 Capture2Doc 的本地推理服务。当前提供 NVIDIA/WSL 上可独立验证的
 PaddleOCR-VL-1.6 BF16 Worker 和 Qwen3.5-9B FP8 Worker。ModelScope 负责准备模型，
-vLLM 只加载本地快照。新增本地 CLI 将 Paddle OCR、Qwen 与 C2D-XML 组装串行连接，
-支持不可变图片、有序文档输入、有限纠错和检查点恢复；单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，内容与样式质量仍需优化。
-暂不包含完整 PaddleOCR 页面 pipeline、HTTP 业务 API、Android 上传或 Agent。
+vLLM 只加载本地快照。本地 CLI V2 将 Paddle OCR、Qwen 多 block 草稿与 C2D-XML 校验串行连接，
+主要输出文档 JSON 和完整逐块报告；每块最多五轮修复，耗尽后局部兜底并继续后续图片。支持不可变输入和检查点恢复，真实模型结果与质量限制见运行文档。
+暂不包含完整 PaddleOCR 页面 pipeline、HTTP 业务 API、Android 上传或通用 Agent 服务。
 
 ## 文档转换 CLI
 
@@ -20,7 +20,8 @@ uv run --extra cuda python scripts/run_document.py \
 
 该 CLI 保持单并发，Paddle 使用原默认配置，Qwen 显式采用 16K context、
 8K 最大输出、640 MiB KV cache 和关闭 thinking。完整 system prompt 以
-`src/capture2doc/prompts/c2d_system.txt` 管理，随包发布并记录运行哈希。
+`src/capture2doc/prompts/c2d_blocks_v2.txt` 与 `c2d_contract_v2.txt` 管理，
+随包发布并记录运行哈希；旧 `c2d_system.txt` 仅用于 V1 恢复。
 
 ## 环境准备
 

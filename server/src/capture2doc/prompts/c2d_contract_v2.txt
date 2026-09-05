@@ -1,0 +1,26 @@
+完整 C2D-XML v0.1 内容契约
+
+三、文档与顶层标签
+最终文档为 <document xmlns="urn:capture2doc:c2d:1" schema-version="0.1">...</document>，xml:lang 是服务端可选语言属性，不由更新包设置。
+合法顶层标签仅有 title、h1、h2、h3、h4、h5、h6、p、blockquote、ul、ol、table、pre、hr。
+title 最多一个且只能位于整篇文档第一位；document_has_title 为 true 时不得新增 title，除非旧尾块本身就是该 title 且本轮只修订它。标题层级使用 h1 至 h6。普通正文使用 p。hr 必须为空元素 <hr/>。上述标签无属性，只有 pre 可有 lang。
+不建立 metadata、content、pages、sources、evidence 包装节点。不得写入 document_id、image_id、page_id、原始分页、坐标、文件路径、采集来源、置信度、耗时或运行状态。
+
+四、行内文本与样式
+title、h1 至 h6、p、li、th、td 的文本可以包含 b、em、del、u、code、a、span、br、latex。
+行内样式固定从外到内为 a → b → em → del → u → code → span → 文本，可省略中间层，不可倒序、重复嵌套同一层或反向嵌套。关闭顺序严格反转。b 加粗、em 斜体、del 删除线、u 下划线、code 行内代码。没有依据不添加装饰性样式。
+a 必须有且只有 href 属性，表达普通链接；不支持预览卡片、书签或 type 属性。b、em、del、u、code 没有属性。
+span 至少有 text-color 或 background-color 之一，两者可同时出现。两种属性都只接受 red、orange、yellow、green、blue、purple、gray。默认颜色省略属性，不输出空 span；不使用 light-*、medium-gray、RGB、十六进制、CSS 变量或 style。
+br 和 latex 不放入上述样式链内部。明确的段内换行用 <br/>。latex 是只含 XML 转义后 LaTeX 文本的叶子，不能嵌套元素。统一使用 latex，不使用 formula。独占一段的公式使用 <p><latex>E = mc^2</latex></p>，不输出 Markdown 数学定界符。
+
+五、容器结构
+ul、ol 只能直接包含 li；li 可以含行内文本及嵌套 ul/ol。列表顺序由位置决定，没有 seq、start 或编号属性。不要输出游离 li。
+blockquote 可包含 p、ul、ol、嵌套 blockquote，使用 p 表达其中多段文字，不使用飞书 cite。
+table 必须包含 tbody，可在其前包含一个 thead。thead/tbody 各至少一行 tr；thead 的单元格是 th，tbody 的单元格是 td。单元格可以有 rowspan、colspan，值是大于等于 1 的整数，其余属性不允许。跨度不能越出所在 thead/tbody 区域。合并覆盖位置不再输出单元格；各行占位后列数一致且无空洞；整行被上方跨度覆盖时允许空 tr。不输出列宽、对齐、边框或单元格背景色。
+跨图片表格先输出当前可验证的完整表格，下轮再完整回传并追加行；不使用未来尚未出现的行来补足 rowspan。大表格也不允许返回行级 patch。
+pre 可有 lang，例如 python；必须只包含一个 code，code 内只含转义后的原始代码文本，保留空白和换行，不添加 caption、标题或 Markdown 围栏。普通行内 code 遵循行内嵌套规则。
+
+六、XML 转义与规范化
+标签本身不得转义；文本中的 &、<、> 分别写为 &amp;、&lt;、&gt;。双引号属性中的引号写为 &quot;，单引号属性中的单引号写为 &apos;。仅使用 XML 预定义实体和合法字符，不使用 HTML 的 &nbsp;。
+不要生成纯空白 p 和 U+200D 等编辑器占位字符。容器之间可缩进，正文与代码中的有效空白保留。不返回未知标签、属性、命名空间或颜色。
+明确排除 img、figure、caption、whiteboard、grid、column、sheet、source、bookmark、button、time、task、chat_card、sub-page-list、cite、callout、checkbox、align 及任意平台专属资源。保持跨图片的逻辑内容，最终输出不复刻原始分页。

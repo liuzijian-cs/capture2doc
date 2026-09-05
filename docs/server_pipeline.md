@@ -1,136 +1,178 @@
-# 手机图片到 C2D-XML：本地 CLI
+# 手机图片到文档 JSON：本地 CLI V2
 
-> 状态：首轮 CLI 已实现；单张真实文档照片的 NVIDIA 双模型闭环、完成后恢复及 SIGTERM 中断续跑已验证，内容与样式质量仍需优化。
->
-> 日期：2026-09-05。当前范围是普通手机文档照片，不承诺复杂版面质量。
+> 2026-09-05：V2 已实现独立 block 草稿、串行局部修复、OCR/纯文本兜底和检查点恢复。真实八图测试结果在本文末尾单独记录；语法通过不代表内容或样式质量达标。
 
-## 本轮确定的业务边界
+## 输入和运行
 
-服务端以 `document_id` 组织图片，只有不可变 `image_id`，不增加逻辑 `page_id` 或同 ID 图片修订。重拍创建新的 image_id，旧图片及其 OCR 仍属于旧身份；最终列表只引用保留的图片。排序仅改变最终列表，不重新 OCR。所有身份、路径和诊断数据都不进入 C2D-XML。
+以 `document_id` 归属不可变的 `image_id`，没有新增服务端 `page_id`。重拍创建新 image_id。用户最终确认的 `ordered_image_ids` 决定请求及提交顺序；一张图片是一批输入，一批可生成多个语义 block。Android 上传、HTTP 服务和跨文档实时队列仍未接入。
 
-未来 Android 图片载荷就绪后逐张上传，接收成功立即排 Paddle OCR；Qwen 占用 GPU 时仍可接收图片，但 OCR 等待。用户确认后冻结文档的 `ordered_image_ids`；所引用图片 OCR 齐备后，程序严格按该列表串行调用 Qwen。程序保证请求和提交顺序，模型是否忠实遵循图片内部阅读顺序仍要验收。
-
-Android 现有 `ScanPage.pageId` 是本地草稿实现细节，重拍时会复用，因此不能直接将它当作不可变的服务端 image_id。后续上传层需要为每份实际图片生成 image_id。本轮不修改 Android 数据模型或接入 HTTP。
-
-CLI 使用清单模拟已接收、已最终确认的输入：先导入图片、冻结列表，再完成所需 OCR 和 Qwen 组装。它不是持续监听的上传服务，不处理多个文档间的队列公平性。
-
-## 运行
-
-在 NVIDIA/WSL 的 `server/` 下，先按模型文档准备环境和两个本地模型快照。CLI 不下载模型，也不调用第三方推理 API。
-
-创建 `input.json`（相对图片路径相对于清单目录）：
+在 NVIDIA/WSL 的 `server/` 目录执行。两个模型必须已准备成本地快照；CLI 不下载模型。
 
 ```json
 {
   "document_id": "demo-001",
   "lang": "zh-CN",
   "images": [
-    {"image_id": "image-a", "path": "photos/a.jpg"},
-    {"image_id": "image-b", "path": "photos/b.jpg"}
+    {"image_id": "image-1", "path": "photos/1.jpg"},
+    {"image_id": "image-2", "path": "photos/2.jpg"}
   ],
-  "ordered_image_ids": ["image-b", "image-a"]
+  "ordered_image_ids": ["image-1", "image-2"]
 }
 ```
 
-最终列表必须非空、无重复，且全部引用清单内图片。`images` 的顺序不决定文档顺序；未被最终列表引用的图片不执行 OCR。ID 使用 1–128 位 ASCII 字母、数字、下划线、点或连字符，首字符为字母或数字。
+图片路径相对于清单目录。最终列表非空、唯一且引用已提供图片；未被引用图片不执行 OCR。ID 长度 1–128，首字符是 ASCII 字母或数字，其余允许字母、数字、`_`、`.`、`-`。
 
 ```bash
 uv run --extra cuda python scripts/run_document.py \
   --manifest /absolute/path/input.json \
-  --output-dir .cache/documents/demo-001
+  --output-dir .cache/documents/demo-001 \
+  --host 10.255.255.254
+
+uv run --extra cuda python scripts/run_document.py \
+  --resume --output-dir .cache/documents/demo-001 \
+  --host 10.255.255.254
 ```
 
-当前推理机如需已验证的 WSL 地址，增加 `--host 10.255.255.254`；其他环境按实际可达地址指定。中断后不再依赖原始清单或清单外的照片：
+`10.255.255.254` 是当前 WSL 已验证地址，其他部署按实际地址配置。恢复必须保持原模型、提示词、主机参数、输入身份和顺序。新目录默认检查点 `schema_version=2`；旧 V1 检查点继续调用原 V1 runner，保留其历史行为。V2 不允许 `--retry-failed` 重置预算。
+
+保留旧失败基线，在**新目录**复用成功 OCR：
 
 ```bash
 uv run --extra cuda python scripts/run_document.py \
-  --resume --output-dir .cache/documents/demo-001
+  --manifest /absolute/path/input.json \
+  --output-dir .cache/documents/demo-v2 \
+  --reuse-ocr-from .cache/documents/demo-v1/result \
+  --host 10.255.255.254
 ```
 
-若首次指定过 `--host` 或 `--cache-dir`，恢复时保持一致。达到重试上限后，先检查原始响应与诊断；显式增加 `--retry-failed` 才给未完成的 OCR/轮次追加最多三次尝试。它不会重新处理已完成 OCR 或已提交轮次。
+导入检查原图 SHA-256、旋正 RGB PNG 身份、Paddle 设置、快照元数据指纹和原始响应内容；只导入正常 `stop` 的 OCR，记录原检查点哈希和耗时。Qwen/提示词可与旧实验不同。不会改写旧目录或复制其修复预算。原始字节保留，两个模型共用 EXIF 已旋正、未二次缩小的 RGB PNG。
 
-原始上传字节保留并计算 SHA-256。服务端生成 EXIF 已旋正的 RGB PNG 作为两模型共同输入，不覆盖原图、不二次缩小像素尺寸。各模型 processor 仍使用自己的既定 max_pixels。恢复时检查原图及派生图身份，输入、顺序、提示词或模型配置改变时要求使用新目录。
+退出码：0 完成；3 完成但待复核（含兜底/缺失）；1 基础设施或配置错误；2 参数错误；130 中断。`processing_status=completed` 表示所有图片已处理，不表示每块都由 VLM 成功生成。
 
-## 参数与装卸
+## JSON 与 block 契约
 
-| 参数 | Paddle | Qwen |
-|---|---:|---:|
-| 输入图片数/请求 | 1 | 1 |
-| max_num_seqs | 1 | 1 |
-| max_model_len | 8192 | 16384 |
-| 最大输出 | 4096 | 8192 |
-| KV cache | 256 MiB | 640 MiB |
-| max_num_batched_tokens | 4096 | 4096 |
-| max_pixels | 1003520 | 1310720 |
-| 量化 | BF16 | fp8_per_channel 在线量化 |
-| thinking | 不适用 | 关闭 |
+主要产物为 `document.json`：顶层 `doc`，其中 `blocks[]` 的顺序决定文档顺序，输出 `block_id` 从 0 编号。内部 ID 和版本用于修复，不能用显示编号定位运行中的可变对象。
 
-不改独立 smoke 的既有默认值。CLI 显式采用 Qwen 实测推荐的 640 MiB；不切换到 17728 极限上下文，不设置 0.95 比例，不创建第二份模型副本。请求允许正常 EOS，SDK 隐式重试关闭，长输出请求超时为 1200 秒。
+```json
+{
+  "doc": {
+    "document_id": "demo-001",
+    "processing_status": "completed",
+    "needs_review": true,
+    "semantic_fidelity_verified": false,
+    "xml_status": "complete",
+    "blocks": [
+      {
+        "block_id": 0,
+        "status": "fallback",
+        "vlm_validation": "failed",
+        "final_validation": "passed",
+        "text": "OCR 原文",
+        "xml": "<p xmlns=\"urn:capture2doc:c2d:1\">OCR 原文</p>",
+        "fallback_source": "ocr",
+        "errors": [],
+        "repair_attempts": 5
+      }
+    ]
+  }
+}
+```
 
-单轮运行先加载 Paddle，顺序完成需要的 OCR 后停止并等待清理；再加载 Qwen，处理全部未完成窗口与纠错，停止后才发布最终文件。每次停止检查所属进程组及显存回落；30 秒内未回到启动前全局显存加 128 MiB 的范围就明确失败，不启动下一个模型。这一容差是资源门禁配置，不是对 WSL 背景显存波动的保证。
+实际失败记录包含错误码、目标块、可取得的行列/XPath、实际与允许结构、修复说明、经过真实校验器验证的正确示例。原失败记录不会被兜底成功抹去；已修好的约束另存 `guards`，当前错误存 `current_errors`。上例为字段示意，实际兜底必有失败记录。
 
-文档目录锁防止同一文档双写，共享 GPU 文件锁防止协作 CLI 同时加载模型。所有进程必须使用相同 `--gpu-lock`；默认位于系统临时目录。该锁不约束手动启动的 vLLM、其他用户或其他应用。Ctrl-C/SIGTERM 走清理路径；SIGKILL、系统断电无法保证 Python 清理执行，恢复前需确认没有残留 Worker。
+| status | 含义 | xml/text | final_validation |
+|---|---|---|---|
+| ok | 模型候选经局部及组合检查通过 | 完整内容 | passed |
+| fallback | 程序采用 OCR 或独立 VLM 文字生成段落 | 完整降级内容 | passed |
+| unresolved | 无法可靠取得该位置的文字 | null | failed |
 
-阶段记录保存所属进程组和清理结果。恢复会检查尚未确认清理的旧阶段：进程组仍存在则拒绝继续，不自动向可能复用的旧 PID 发信号；进程组退出后重新检查显存。进程启动与记录落盘之间仍存在极短的异常窗口，因此该记录不替代操作系统级进程托管。
+XML 字符串使用 JSON 库无损序列化。兜底段落用 XML 库构建，特殊字符自动转义，换行使用 `br`；不会靠剥除损坏 XML 标签取得文字。状态、错误、来源和图片身份均不进入公开 C2D-XML。
 
-## 生成、检查点与恢复
+有缺失记录时只输出 `document.partial.c2d.xml`，JSON 保留缺失位置；没有任何可用块则不生成空的非法 XML，`xml_status=unavailable`。处理中导出的 XML 也明确标为 partial。没有缺失时输出 `document.c2d.xml`；fallback 仍要求人工复核。
 
-每张图片可以对应多个顺序 OCR 文本窗口，一轮可以生成多个完整顶层 block。输入游标用内部字符区间记录；预算始终按真实 Qwen processor/tokenizer 计算，不用字符数代替 token 数。
+## 主上下文与工具协议
 
-每轮先计算完整 system、图片、OCR、历史和重试信息的输入 token 数，保留 512 token 余量：
+图片决定有效正文、阅读顺序和样式，OCR 只作参考。不按主题删段或总结；保留有效标题、正文、编号、注释、页眉页脚、代码、公式及表格，只去掉明确在文档之外的桌面、工具栏和物理环境文字。粗体和受限颜色依据图片恢复。
+
+主上下文含完整 C2D 契约、已校验结构与样式 few-shot、完整当前图、OCR/来源片段、最近 1–3 个完整历史块及可选旧尾块。模型分别返回每块 `xml`、独立 `text` 和 `ocr_refs`。OCR 片段按原始换行分配 `image_id:ocr:行号` 及字符区间，仅定位来源，不决定 block 粒度。
+
+本轮实现应用层 JSON action 工具协议，复用已验证的 Qwen 普通 chat 模板，不引入原生 function-calling parser 或额外模型实例：
+
+- `submit`：主生成提交新增 blocks 及可选完整尾块；修复只能替换请求指定的目标组。
+- `read_blocks`：按历史显示编号读取最多 3 个完整已提交块。
+- `search_blocks`：短关键词检索，返回最多 3 个完整匹配块。
+
+每个生成/修复任务最多 3 次只读工具调用，工具请求和结果均持久化；随后必须提交结果。历史工具不能修改任何块。主生成只可改变旧尾块和新增内容；修复携带目标版本/尝试 ID，只能更改当前任务范围。
+
+修复额外提供目标完整 XML、独立文字、相关邻居、当前错误与已修好约束；不会重新生成其他正确块。允许在目标范围内拆分和合并，服务端用连续数组替换保持顺序。旧尾块必须在第一个替换块中保留全部旧文字，代码空白也须保留；否则回退原尾块。
+
+每次请求用实际 Qwen processor/tokenizer 计算 system、图片、JSON（含工具结果）的完整 token 数：
 
 ```text
 allowed_output = min(8192, 16384 - actual_prompt_tokens - 512)
 ```
 
-常规历史沿用最多三块、768/1536 token 规则。尾块超过 1536 时，只要真实输入及完整回传输出预算允许，就单独携带完整尾块。预算不足时依次移除失败响应副本、只读历史，随后缩小当前 OCR 窗口；不截断或摘要尾块。完整尾块自身无法放入窗口时停止并保留检查点；首版没有任意长度 block 或表格行级 patch。
+没有沿用旧的 1536 token 尾块硬上限。预算不足先减少可选历史至一块，不截断尾块、目标 XML、OCR 或图片；仍无法容纳至少 512 输出 tokens 时让该任务进入局部兜底。此实现不承诺无限上下文或无限输出；`finish_reason=length` 的响应即使包含闭合 XML/JSON 也不视为完成。
 
-每轮先在候选组装器中执行更新包与完整文档校验，再检查内容。通过后，把轮次序号、image_id、输入区间、源文本哈希、旧文档哈希、完整更新包及其哈希写入同一个原子检查点。恢复从空组装器按顺序重放已提交日志，每个提交只重放一次；未提交的响应文件只作证据，不自动应用。
+## 草稿、修复与局部兜底
 
-推理可能因中断而重新执行，但文档提交不会因此重复。不能把此语义理解为“模型请求恰好执行一次”。全部轮次完成后重新校验并原子写出 XML；已有不同内容的最终文件不覆盖。
+每张图先生成独立草稿，逐块 XML/XSD/语义检查，再用最终 document 规则检查组合（例如 title 只能在文档开头）。正确块保留；独立失败块分别排队，共同约束涉及的连续块组成关联任务。一个 Qwen 串行取任务，不并发推理。
 
-| 情况 | 本轮行为 |
-|---|---|
-| Paddle `finish_reason=length` | 保留原始响应，标记 OCR_TRUNCATED 并停止；以单图 4K 内为首轮输入假设，不自动重复同一容量不足请求 |
-| 空响应、异常停止、请求错误 | 保存可取得的响应/错误，有限重试，不把非空或 HTTP 成功视为完成 |
-| Qwen 输出截断 | 即使已闭合 XML 也不提交；缩小 OCR 输入窗口并重新生成，不补闭合标签 |
-| XML/Schema/业务规则错误 | 旧文档不变，携带错误和预算允许的上一响应重试，初始最多三次尝试 |
-| 尾块丢字 | 保守拒绝；首轮允许结构调整、续接，但不允许删除或改写已有尾块文字，代码另保留精确空白 |
-| 内容明显不匹配 | 单独对齐当前 OCR 窗口与去掉完整旧尾块后的新增输出；覆盖率或支持率低于 0.80 时拒绝并纠错，长历史不能掩盖新内容遗漏 |
-| 内容中等差异 | 任一比例低于 0.95 时最终标记 needs_review；这两个阈值是未校准的启发式起点，不是质量成绩 |
+初次生成后最多 5 轮，只处理仍失败的任务。每个初始块/关联组最多 5 次修复；拆分后的子块共享祖先预算，合并继承预算，中断请求也消耗该次预算。多个独立失败块的总调用数可超过 5。结果携带版本与尝试 ID，拒绝过期、重复和越界结果；同一已收到响应可从检查点继续应用，不必再次调用模型。
 
-字符对齐可发现部分遗漏、重复或无依据输出，但去页眉、公式写法、OCR 错字修正也可能触发差异；它无法发现所有语义错误，更无法检测两个模型共同漏掉的图片内容。状态 complete 只表示流程与既定检查通过，始终记录 `semantic_fidelity_verified=false`。真实照片需人工对照，不能声称 100% 内容忠实。
+耗尽后由程序选择：
 
-退出码：0 为流程完成；1 为错误；2 为参数错误；3 为 XML 已生成但存在内容复核标记；130 为中断。
+1. 来源引用有效、且未被其他候选或历史块共享的对应 OCR 原文；按服务端来源顺序拼接。
+2. 该块独立保存的 VLM 纯文本，标记 `fallback_source=vlm_text`。
+3. `unresolved` 缺失记录，不编造正文。
 
-## 提示词管理
+所有兜底重新校验并待复核。不会把整张 OCR 放入多个失败块；只有整个候选列表没有生成时，允许整图 OCR 降级一次。旧尾块失败则恢复原尾块，只降级当前图片的新文字；无法分离时留下缺失位置。
 
-完整模型侧 C2D 契约位于 `server/src/capture2doc/prompts/c2d_system.txt`，覆盖标签、属性、嵌套、七色、表格网格、转义、安全边界、尾块更新、纠错和合法样例。它是面向模型的完整生成规则，不复制 Renderer 平台映射说明或整个 XSD。规范依据仍是 `c2d_xml.md` 与随包 XSD。
+该图全部任务进入终态后，候选草稿作为证据保存，正式 blocks、图片游标及提交日志写入同一个原子 `state.json`。后续图片继续处理。导出 JSON/XML/报告是该检查点的可重建投影，导出中断可以恢复；不覆盖被外部修改的结果文件。
 
-使用 UTF-8 TXT + Git 审查/版本历史，通过 importlib.resources 加载，随 wheel 分发，不依赖工作目录。运行保存 prompt_id、完整 system 文本和 SHA-256，恢复拒绝混用提示词。动态 OCR/历史通过 JSON 序列化放进 user message，不在 system 文本中使用字符串模板替换；预检和请求共用消息构建器。
+OCR 截断或空响应明确记录 `complete=false`，保留原始响应，图片仍可供 Qwen 识别；不把非空文本当成完整 OCR。OCR 与输出字符对齐仅作诊断，差异较大可标记待复核，**不会再触发硬性覆盖率修复**。无法自动检测两模型共同漏字，也不能以 XML 校验保证语义保真。
 
-TXT 与 Markdown 都可用于提示词，扩展名不是工业质量保证。本项目选择 TXT 是因为内容直接作为 system 文本，不需要模板执行器；版本绑定、可复现请求、示例校验和真实样本评测才是维护重点。参考 [Promptfoo 文件提示词](https://www.promptfoo.dev/docs/configuration/prompts/) 与 [Langfuse 版本管理概念](https://langfuse.com/docs/prompt-management/data-model)，本轮不引入这些服务依赖。
+存储损坏、原图身份冲突、模型/提示词漂移和 GPU 清理失败仍停止运行。检查点内容有完整性哈希，原图、OCR 原始响应和已提交草稿也校验身份/哈希。
 
-修改 v0.1 规范时，应同步模型契约、示例与校验测试；提示词的 XML 样例会用真实校验器检查。提示词变更后的真实 tokenizer 长度和生成质量必须在推理机重新验证。
+## 参数、模型装卸与提示词
 
-## 产物与验证边界
+| 参数 | Paddle | Qwen |
+|---|---:|---:|
+| max_num_seqs / 图片数每请求 | 1 / 1 | 1 / 1 |
+| context / 最大输出 | 8192 / 4096 | 16384 / 8192 |
+| KV cache | 256 MiB | 640 MiB |
+| max_num_batched_tokens | 4096 | 4096 |
+| max_pixels | 1003520 | 1310720 |
+| 精度 | BF16 | fp8_per_channel 在线量化 |
+| thinking | 不适用 | 关闭 |
+
+保持既有参数；不改 0.95 比例，不启动两个模型副本。Paddle 先完成待处理 OCR，卸载并检查所属进程组退出、显存回到基线加 128 MiB 内，再加载 Qwen。Qwen 完成所有图片与修复后卸载。清理超时阻止后续加载；不自动杀死可能复用 PID 的旧进程组。SDK 隐式重试关闭，请求超时 1200 秒。
+
+文档锁防止同目录双写，GPU 文件锁约束协作 CLI；不约束手动启动的 Worker。SIGTERM/Ctrl-C 可走清理路径；SIGKILL/断电后的资源回收仍需操作系统托管。
+
+UTF-8 TXT + Git 管理提示词，通过 `importlib.resources` 随包加载。V2 使用 `c2d_blocks_v2.txt`（任务及工具协议）和 `c2d_contract_v2.txt`（完整格式规则）；`blocks.py` 保存已校验 few-shot，并随动态请求提供。运行绑定提示词、样例和模型配置哈希，保存完整请求及原始响应。`c2d_system.txt` 仅供 V1 恢复。
+
+## 产物与自动化
 
 ```text
 output-dir/
-  state.json                 # 图片、OCR、轮次日志、配置、状态和错误
-  images/                    # 不可变原始图片
-  prepared/                  # 两模型共用的旋正 RGB PNG
-  ocr/                       # 各次 OCR 原始响应
-  rounds/                    # 请求、响应、完整模板及校验/内容报告
-  runs/                      # system 快照、vLLM 日志、加载/卸载/显存统计
-  document.c2d.xml            # 全部轮次通过后生成
+  state.json                 # V2 权威原子检查点，含当前草稿、预算和提交顺序
+  document.json              # 主要结果，doc.blocks[]
+  document.c2d.xml            # 完成且无缺失的位置时生成
+  document.partial.c2d.xml    # 有缺失或处理中的可用 XML，和上项互斥
+  blocks.md                  # Block 0 开始，完整文字/XML/状态/次数/来源/错误
+  summary.json               # 状态计数、逐图诊断、运行与草稿证据索引
+  images/ prepared/ ocr/     # 输入、两模型共用图片、原始 OCR
+  requests/ responses/       # 完整 Qwen 输入、预算、原始响应及耗时
+  drafts/                    # 每张图已终态的草稿、原候选、全部尝试
+  runs/                      # 提示词快照、vLLM 日志、显存及装卸指标
 ```
 
-本地自动化使用可控模型边界，实际执行身份冻结、模型阶段编排、真实 XML 校验、原子落盘和日志恢复。覆盖乱序清单、删除图片、截断、有限纠错、中断、重复提交保护、配置漂移、超长尾块、内容诊断和锁互斥。
+本地测试以可控模型边界执行真实 XML 校验、存储和调度；覆盖丰富 XML/中文/转义无损 JSON、多块隔离、五次预算、拆分合并、OCR 冲突、纯文本及缺失兜底、尾块恢复、过期/重复响应、中断和导出恢复、上下文耗尽、只读历史、GPU 清理门禁及旧 OCR 身份校验。这些测试不代替真实模型和视觉质量验收。
 
-这些自动化测试不加载 GPU 模型。真实模型验收独立记录如下，不继承旧 smoke/压力测试的通过结论；多张真实照片跨轮续接、模型实际触发的纠错和截断处理仍需扩充样本验证。
+## 历史 V1 单图验证
 
-本轮实际本地检查：服务端全量 **187 项测试通过**，相关 Python 文件 Ruff 检查通过；真实 CLI 子进程已验证无 CUDA 情况下恢复完成文档及 needs_review 退出码。另用 Pillow 构造 EXIF 旋转 JPEG，验证原图不变、两模型共用 RGB 像素、旋正尺寸及派生 PNG 可重复；已构建 wheel 并确认完整 TXT 提示词和 XSD 随包分发。这些结果不包含真实 OCR/Qwen 推理。
+下文为旧 V1 运行的原始结果，参数和指标不能视为 V2 的测试结果。旧八图失败基线也保留，V2 使用独立目录。
 
 ## 2026-09-05 WSL 真实模型验证
 
