@@ -69,6 +69,18 @@ def normalized(text: str) -> str:
     return "".join(text.split()).replace("\u200d", "")
 
 
+def repair_feedback(attempts: list[dict[str, Any]], start: int, end: int) -> list[str]:
+    """Keep distinct constraints for this exact uncommitted source window."""
+    errors: list[str] = []
+    for attempt in attempts:
+        if attempt["source_start"] != start or attempt["source_end"] != end:
+            continue
+        for message in attempt.get("validation_errors", attempt.get("errors", [])):
+            if message not in errors:
+                errors.append(message)
+    return errors[-12:]
+
+
 def content_check(
     update: str, tail: str | None, ocr: str
 ) -> tuple[dict[str, Any], list[str]]:
@@ -81,12 +93,18 @@ def content_check(
     # hide a completely omitted short window or dilute duplicated new content.
     if old and first.startswith(old):
         actual = actual[len(old) :]
-    matched = sum(
-        m.size
-        for m in SequenceMatcher(
-            None, expected, actual, autojunk=False
-        ).get_matching_blocks()
-    )
+    matcher = SequenceMatcher(None, expected, actual, autojunk=False)
+    matched = sum(m.size for m in matcher.get_matching_blocks())
+    missing, extra = [], []
+    for kind, i, j, a, b in matcher.get_opcodes():
+        if kind != "equal":
+            if j > i:
+                missing.append(expected[i:j])
+            if b > a:
+                extra.append(actual[a:b])
+    # Diagnostic excerpts, not claims that the OCR is a semantic ground truth.
+    missing = [s[:160] for s in sorted(missing, key=len, reverse=True)[:4]]
+    extra = [s[:160] for s in sorted(extra, key=len, reverse=True)[:4]]
     coverage = matched / len(expected) if expected else 1.0
     grounded = matched / len(actual) if actual else 0.0
     errors = []
@@ -103,12 +121,18 @@ def content_check(
     if coverage < 0.80 or grounded < 0.80:
         errors.append(
             f"CONTENT_MISMATCH: OCR/tail coverage={coverage:.3f}, output support={grounded:.3f}; "
-            "check omitted, changed, invented or duplicated content"
+            "check omitted, changed, invented or duplicated content. "
+            f"Missing OCR excerpts: {json.dumps(missing, ensure_ascii=False)}. "
+            f"Unmatched output excerpts: {json.dumps(extra, ensure_ascii=False)}. "
+            "Restore the missing source text in order while also fixing ALL schema errors. "
+            "Use only this OCR window; image content outside it is not consumed by this round."
         )
     return {
         "method": "new-window-character-alignment-v1",
         "source_coverage": round(coverage, 6),
         "output_support": round(grounded, 6),
+        "missing_ocr_excerpts": missing,
+        "unmatched_output_excerpts": extra,
         "needs_review": coverage < 0.95 or grounded < 0.95,
         "semantic_fidelity_verified": False,
     }, errors
@@ -440,6 +464,8 @@ def _run_round(
             "QWEN_TRUNCATED", "Cannot split source window further while retaining tail"
         )
     while len(past) < limit:
+        errors = repair_feedback(past, start, end)
+        planned_end = end
         end, prompt, inspection, output, tail = plan_request(
             models,
             assembler,
@@ -453,6 +479,22 @@ def _run_round(
             previous,
             index > 0,
         )
+        if end != planned_end:
+            # A budget-driven smaller window must not inherit stale omissions
+            # from a larger source range that is no longer being requested.
+            end, prompt, inspection, output, tail = plan_request(
+                models,
+                assembler,
+                store.root / image["model_path"],
+                image_id,
+                ocr,
+                start,
+                end,
+                system,
+                repair_feedback(past, start, end),
+                None,
+                index > 0,
+            )
         attempt_id = uuid4().hex
         prefix = f"rounds/{index:04d}/{attempt_id}"
         request_ref = store.artifact(
@@ -516,6 +558,7 @@ def _run_round(
             report: dict[str, Any] = {}
             if validation.valid:
                 report, errors = content_check(result.content, tail, ocr[start:end])
+            attempt["validation_errors"] = list(errors)
             attempt["validation_ref"] = store.artifact(
                 f"{prefix}/validation.json",
                 {

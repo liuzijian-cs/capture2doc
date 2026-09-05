@@ -24,6 +24,7 @@ from capture2doc.pipeline.runner import (
     PipelineError,
     content_check,
     plan_request,
+    repair_feedback,
     replay,
     run_document,
 )
@@ -234,7 +235,9 @@ def test_invalid_xml_repair_uses_unchanged_tail(tmp_path: Path) -> None:
     )
 
 
-def test_nested_pre_repair_keeps_location_code_and_previous_tail(tmp_path: Path) -> None:
+def test_nested_pre_repair_keeps_location_code_and_previous_tail(
+    tmp_path: Path,
+) -> None:
     texts = {"a": "alpha", "b": "beta\n  gamma"}
     store, _ = document(tmp_path, texts)
     invalid = update(
@@ -256,6 +259,46 @@ def test_nested_pre_repair_keeps_location_code_and_previous_tail(tmp_path: Path)
     final = ElementTree.fromstring(output.read_bytes())
     assert len(final) == 2 and len(store.state["rounds"]) == 2
     assert final[1][0].text == "beta\n  gamma"
+
+
+def test_resume_preserves_schema_and_omission_feedback_together(tmp_path: Path) -> None:
+    texts = {"a": "beta\n  gamma"}
+    store, _ = document(tmp_path, texts)
+    nested = response(
+        update("<blockquote><pre><code>beta\n  gamma</code></pre></blockquote>")
+    )
+    models = FakeModels(
+        texts, actions=[nested, response(update("<p>beta</p>")), nested]
+    )
+    with pytest.raises(PipelineError, match="Last errors"):
+        run(store, models)
+    assert not store.state["rounds"]
+    store.load()
+    resumed = FakeModels(
+        texts, actions=[response(update("<pre><code>beta\n  gamma</code></pre>"))]
+    )
+    output = run(store, resumed, retry_failed=True)
+    feedback = "\n".join(resumed.requests[0]["retry_errors"])
+    assert "SCHEMAV_ELEMENT_CONTENT" in feedback
+    assert "CONTENT_MISMATCH" in feedback
+    assert 'Missing OCR excerpts: ["gamma"]' in feedback
+    assert "ocr:a" not in resumed.events
+    assert len(store.state["rounds"]) == 1
+    assert ElementTree.fromstring(output.read_bytes())[0][0].text == "beta\n  gamma"
+
+
+def test_smaller_source_window_does_not_inherit_old_omissions() -> None:
+    old = {
+        "source_start": 0,
+        "source_end": 100,
+        "validation_errors": ["missing later text"],
+    }
+    current = {
+        "source_start": 0,
+        "source_end": 50,
+        "validation_errors": ["current issue"],
+    }
+    assert repair_feedback([old, current], 0, 50) == ["current issue"]
 
 
 def test_interruption_reuses_ocr_and_does_not_reapply_committed_round(
