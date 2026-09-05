@@ -79,7 +79,7 @@ class Models(FakeModels):
                 )
         result = submit(
             block(
-                payload["ocr_text"],
+                "".join(s["text"] for s in payload["ocr_sources"]),
                 refs=[s["source_id"] for s in payload["ocr_sources"]],
             )
         )
@@ -171,7 +171,8 @@ def test_one_bad_block_repairs_five_times_then_later_image_continues(tmp_path):
     for request in models.requests[1:6]:
         assert len(request["targets"]) == 1
         assert request["targets"][0]["text"] == "失败原文"
-        assert request["ocr_text"] == texts["a"]
+        assert "".join(s["text"] for s in request["ocr_sources"]) == texts["a"]
+        assert "ocr_text" not in request
         assert request["targets"][0]["current_errors"][0]["correct_example"]
     assert [b["block_id"] for b in output["blocks"]] == [0, 1, 2]
 
@@ -876,3 +877,148 @@ def test_known_tail_suffix_uses_text_when_ocr_also_contains_history():
     output = commit_blocks([old_tail], draft)
     assert [b["text"] for b in output] == ["旧尾", "续写"]
     assert output[1]["fallback_source"] == "vlm_text"
+
+
+def test_xml_omission_repairs_real_heading_and_intro_without_dropping_either(tmp_path):
+    heading = "功能亮点："
+    intro = "MiniCPM-o4.5 带来了多项突破性的新特性："
+    text = heading + intro
+    store = setup(tmp_path, {"a": text})
+
+    def split_title_and_intro(payload):
+        target = payload["targets"][0]
+        assert target["text"] == text
+        issue = next(
+            e for e in target["current_errors"] if e["code"] == "XML_TEXT_OMISSION"
+        )
+        assert issue["text_position"]["missing_suffix"] == intro
+        assert issue["text_position"]["xml_start"] == 0
+        assert issue["xpath"] and issue["line"]
+        assert validate_update(issue["correct_example"]).valid
+        return {
+            "action": "submit",
+            "attempt_id": payload["attempt_id"],
+            "target_versions": payload["target_versions"],
+            "blocks": [block(heading, f"<h2>{heading}</h2>"), block(intro)],
+        }
+
+    models = Models(
+        {"a": text},
+        actions=[submit(block(text, f"<h2>{heading}</h2>")), split_title_and_intro],
+    )
+    run(store, models)
+    output = result(store)["blocks"]
+    assert [b["text"] for b in output] == [heading, intro]
+    assert [b["status"] for b in output] == ["ok", "ok"]
+    assert [b["repair_attempts"] for b in output] == [1, 1]
+    assert len(models.requests) == 2
+    assert validate_document((store.root / "document.c2d.xml").read_bytes()).valid
+
+
+def test_xml_omission_preserves_full_independent_text_and_both_missing_positions():
+    before, after = "这里是不可省略的前置说明", "这里是不可省略的后置说明"
+    value = candidate(block(before + "标题" + after, "<h2>标题</h2>"), "a")
+    assert value["status"] == "pending"
+    assert value["text"] == before + "标题" + after
+    assert value["model_text"] == value["text"]
+    issue = value["current_errors"][0]
+    assert issue["code"] == "XML_TEXT_OMISSION"
+    assert issue["text_position"]["xml_start"] == len(before)
+    assert issue["text_position"]["missing_prefix"] == before
+    assert issue["text_position"]["missing_suffix"] == after
+    assert value["representation_diagnostic"]["hard_gate"]
+
+
+@pytest.mark.parametrize(
+    "extra, expected_status",
+    [("甲乙丙丁戊己庚", "ok"), ("甲乙丙丁戊己庚辛", "pending")],
+)
+def test_xml_omission_requires_eight_additional_nonspace_characters(
+    extra, expected_status
+):
+    value = candidate(block("标题\n" + extra, "<h2>标题</h2>"), "a")
+    assert value["status"] == expected_status
+    assert value["representation_diagnostic"]["missing_nonspace_characters"] == len(
+        extra
+    )
+
+
+def test_short_caption_never_replaces_long_valid_table(tmp_path):
+    table = (
+        "<table><tbody>"
+        + "".join(f"<tr><td>行{i}</td><td>完整内容{i}</td></tr>" for i in range(30))
+        + "</tbody></table>"
+    )
+    store = setup(tmp_path, {"a": "表格"})
+    models = Models({"a": "表格"}, actions=[submit(block("表格", table))])
+    run(store, models)
+    value = store.state["blocks"][0]
+    assert value["status"] == "ok"
+    assert value["model_text"] == "表格"
+    assert "行29\t完整内容29" in value["text"]
+    assert not value["representation_diagnostic"]["hard_gate"]
+    assert not value["current_errors"]
+    assert len(models.requests) == 1
+
+
+@pytest.mark.parametrize("model_text", ["A\n\tB\r\nC\tD", "A B\nC D"])
+def test_equivalent_table_layout_whitespace_does_not_trigger_omission(model_text):
+    value = candidate(
+        block(
+            model_text,
+            "<table><tbody><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></tbody></table>",
+        ),
+        "a",
+    )
+    assert value["status"] == "ok"
+    assert value["text"] == "A\tB\nC\tD"
+    assert not value["representation_diagnostic"]["hard_gate"]
+    assert not value["current_errors"]
+
+
+@pytest.mark.parametrize(
+    "model_text, xml, relation",
+    [
+        (
+            "<|im_start|>正文<|im_end|>",
+            "<p>正文</p>",
+            "code_or_control_label_difference",
+        ),
+        (
+            "```python\nprint(1)\n```",
+            "<pre><code>print(1)</code></pre>",
+            "code_or_control_label_difference",
+        ),
+        (
+            "以下代码块的控制标签\nprint(1)",
+            "<pre><code>print(1)</code></pre>",
+            "code_or_control_label_difference",
+        ),
+        ("标题: 原文内容", "<p>标题：原文内容</p>", "uncertain_difference"),
+        (
+            "if ready:\n  go()\n",
+            "<pre><code>if ready:\n    go()\n</code></pre>",
+            "code_whitespace_difference",
+        ),
+        ("----------------正文", "<p>正文</p>", "xml_is_text_substring"),
+    ],
+)
+def test_uncertain_representation_differences_are_diagnostic_only(
+    model_text, xml, relation
+):
+    value = candidate(block(model_text, xml), "a")
+    assert value["status"] == "ok"
+    assert value["model_text"] == model_text
+    assert value["representation_diagnostic"]["relation"] == relation
+    assert not value["representation_diagnostic"]["hard_gate"]
+    assert not value["current_errors"]
+
+
+def test_empty_xml_text_is_allowed_for_hr_but_not_a_substantial_omission():
+    text = "这段明确正文不能全部消失"
+    separator = candidate(block(text, "<hr/>"), "a")
+    missing = candidate(block(text, "<h2/>"), "a")
+    assert separator["status"] == "ok" and separator["text"] == ""
+    assert separator["representation_diagnostic"]["relation"] == "non_text_separator"
+    assert missing["status"] == "pending" and missing["text"] == text
+    assert missing["current_errors"][0]["code"] == "XML_TEXT_OMISSION"

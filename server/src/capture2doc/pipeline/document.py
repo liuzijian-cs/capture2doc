@@ -297,8 +297,12 @@ def request_context(state: dict, draft: dict, attempt: dict) -> dict:
                     neighbors.append(n)
     return {
         "mode": "generate" if attempt["kind"] == "generate" else "repair",
+        "task_scope": (
+            "整图视觉转录：检查全部文档区域，OCR只是参考。"
+            if attempt["kind"] == "generate"
+            else "局部结构修复：只返回 targets 的全部内容。neighbors、历史和图上其他内容不得加入 blocks。"
+        ),
         "image_id": draft["image_id"],
-        "ocr_text": image["ocr"]["content"],
         "ocr_complete": image["ocr"].get("complete", False),
         "ocr_sources": image["sources"],
         "mutable_tail": view(draft["old_tail"]) if draft["old_tail"] else None,

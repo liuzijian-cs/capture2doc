@@ -165,13 +165,20 @@ def validate_block(block: dict) -> None:
                     [block["id"]],
                 )
             )
+    xml_text = None
+    if not records and root is not None:
+        xml_text = plain_text(root[0])
+        block["model_text"] = block["text"]
+        diagnostic, omission = representation_check(block, root[0], xml_text)
+        block["representation_diagnostic"] = diagnostic
+        if omission is not None:
+            records.append(omission)
     if not records and root is not None:
         block["xml"] = etree.tostring(root[0], encoding="unicode", with_tail=False)
         block["status"] = "ok"
         block["vlm_validation"] = block["final_validation"] = "passed"
         # Valid XML is the authoritative final text; keep the independent model text for evidence.
-        block["model_text"] = block["text"]
-        block["text"] = plain_text(root[0])
+        block["text"] = xml_text
     else:
         if not isinstance(block["text"], str):
             block["text"] = None
@@ -208,6 +215,94 @@ def plain_text(node: Any) -> str:
 def structural_text(text: str) -> str:
     """Ignore layout breaks, retaining ordinary spaces inside a line of text."""
     return re.sub(r"[ \t]*[\r\n]+[ \t]*", "", text).replace("\t", "")
+
+
+def representation_check(
+    block: dict, node: Any, xml_text: str
+) -> tuple[dict, dict | None]:
+    """Only a substantial, literal XML omission is a local repair condition.
+
+    Independent text may itself be an abbreviated caption or contain code/UI
+    labels. Uncertain disagreement remains evidence, never authority to shorten
+    valid XML or an OCR-based content gate.
+    """
+    model_text = block["text"]
+    expected, actual = structural_text(model_text), structural_text(xml_text)
+    tag = etree.QName(node).localname
+    contains_code = any(
+        etree.QName(child).localname in {"pre", "code"} for child in node.iter()
+    )
+    diagnostic = {
+        "method": "independent-text-vs-valid-xml",
+        "normalization": "structural-linebreaks-and-tabs-only",
+        "relation": "uncertain_difference",
+        "hard_gate": False,
+        "model_text_nonspace_characters": sum(not c.isspace() for c in model_text),
+        "xml_text_nonspace_characters": sum(not c.isspace() for c in xml_text),
+    }
+    if model_text == xml_text:
+        diagnostic["relation"] = "equal"
+    elif tag == "hr":
+        diagnostic["relation"] = "non_text_separator"
+    elif expected == actual:
+        diagnostic["relation"] = (
+            "code_whitespace_difference"
+            if contains_code
+            else "structural_whitespace_only"
+        )
+    elif expected and expected in actual:
+        diagnostic["relation"] = "xml_contains_more_text"
+    elif actual in expected:
+        start = expected.index(actual)
+        prefix, suffix = expected[:start], expected[start + len(actual) :]
+        extra = prefix + suffix
+        missing_count = sum(not c.isspace() for c in extra)
+        diagnostic.update(
+            relation="xml_is_text_substring",
+            xml_text_start=start,
+            missing_nonspace_characters=missing_count,
+        )
+        control_markup = re.search(
+            r"<\|[^>\r\n]+\|>|</?(?:think|tool_call|tool_response)>|```|~~~",
+            extra,
+        )
+        if (contains_code and actual) or control_markup:
+            diagnostic["relation"] = "code_or_control_label_difference"
+        elif missing_count >= 8 and any(c.isalnum() for c in extra):
+            diagnostic["hard_gate"] = True
+            record = error(
+                "XML_TEXT_OMISSION",
+                "合法 XML 的文字是独立 text 的真子串，"
+                f"缺少至少 {missing_count} 个非空白字符。"
+                "标题后的引导句或前后正文不能只保留在 text 中。",
+                [block["id"]],
+            )
+            example = envelope(
+                "<h2>使用说明：</h2><p>设备在采样完成后将结果写入缓存。</p>"
+            )
+            if not validate_update(example).valid:
+                raise RuntimeError("Invalid bundled XML/text omission example")
+            record.update(
+                line=node.sourceline,
+                xpath=node.getroottree().getpath(node),
+                text_position={
+                    "normalization": diagnostic["normalization"],
+                    "xml_start": start,
+                    "xml_end": start + len(actual),
+                    "missing_prefix": prefix,
+                    "missing_suffix": suffix,
+                },
+                actual_structure=f"{tag} 仅表达了独立 text 的一部分。",
+                allowed_structure="每个块的 XML 和 text 表达同一份完整文字；标题和引导句可拆成 h2 + p。",
+                repair_instruction=(
+                    "保留 targets.text 全文，不增加邻居内容。把遗漏的前后正文写入 XML；"
+                    "若包含标题和引导句，将其拆成两个完整候选，分别给出对应的 xml/text。"
+                    "已有粗体、颜色和其他样式保持不变，不用短 XML 覆盖完整 text。"
+                ),
+                correct_example=example,
+            )
+            return diagnostic, record
+    return diagnostic, None
 
 
 def protected_code(block: dict) -> list[str]:
