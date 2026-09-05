@@ -1,7 +1,7 @@
 # Android 开发环境
 
-> 状态：开发、构建、首台真机安装与 CameraX 完整验收均已通过
-> 最近核对：2026-09-03，macOS / Apple Silicon
+> 状态：开发环境与既有 CameraX 真机基线已通过；2026-09-04 相机页 UI 已实现且最终本地构建检查通过，新 UI 真机验收待执行
+> 最近核对：2026-09-04，macOS / Apple Silicon
 
 本文档集中记录 Capture2Doc Android 工程的工具链版本、本机环境、首次初始化、构建和真机调试步骤。具体依赖版本仍以 [`android/gradle/libs.versions.toml`](../android/gradle/libs.versions.toml) 和 [`android/app/build.gradle.kts`](../android/app/build.gradle.kts) 为准。
 
@@ -50,19 +50,21 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 | `java -version` | OpenJDK 21.0.8 |
 | `gradle -v` | Gradle 8.13，Launcher/Daemon 使用 JBR 21.0.8 |
 | Gradle Wrapper | 已生成并进入工程目录 |
-| `:app:assembleDebug` | 通过，已生成 Debug APK |
-| `:app:testDebugUnitTest` | 通过，包含 1280 像素尺寸计算测试 |
-| `:app:lintDebug` | 通过，已生成 HTML 报告 |
-| `:app:assembleDebugAndroidTest` | 通过，已生成真机测试 APK |
-| Android 真机 | ADB 授权完成，低延迟 Debug APK 已安装并冷启动成功 |
-| CameraX 真机验证 | 功能、连续拍摄、方向、对焦、文件输出与性能验收均通过 |
-| `:app:connectedDebugAndroidTest` | 8 个测试全部通过 |
+| `:app:assembleDebug` | 最终修复后通过，已生成 Debug APK |
+| `:app:testDebugUnitTest` | 最终修复后通过，包含尺寸计算与完成门槛测试 |
+| `:app:lintDebug` | 最终修复后通过，已生成 HTML 报告 |
+| `:app:assembleDebugAndroidTest` | 最终修复后通过，已生成设备测试 APK |
+| Android 真机 | 改造前的低延迟 Debug APK 已安装并冷启动成功；当前没有连接设备 |
+| CameraX 真机验证 | 改造前的功能、连续拍摄、方向、对焦、文件输出与性能验收均通过 |
+| `:app:connectedDebugAndroidTest` | 改造前 8 个测试通过；新 UI 未执行，当前没有连接设备 |
 
 当前不影响真机开发的缺项：
 
 - 没有安装 Android command-line tools、system image 或 AVD；
 - 暂未建立模拟器测试矩阵；
 - CameraX 低延迟连续拍照探针已通过构建、自动化连接测试和完整真机验收。
+
+稳定 viewport、overlay 候选条与底部控件已经完成代码实现，并通过最终修复后的 JVM、Debug、Lint 和设备测试 APK 构建。由于当前没有连接设备，新 UI 的连接测试与真机验收不计入“已通过”，后续按 [Android 相机测试与验收](android_camera_testing.md) 的新增清单验证。
 
 项目当前优先使用 Android 真机验证，因此不要求先下载模拟器 system image。
 
@@ -77,7 +79,7 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 进入 Android 工程目录，将 `/path/to/gradle-8.13` 替换为实际解压路径：
 
 ```bash
-cd /Users/zane/workspace/project/capture2doc/android
+cd /Users/zane/workspace/project/capture2doc-android/android
 
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 ANDROID_HOME="/Users/zane/Library/Android/sdk" \
@@ -99,7 +101,7 @@ Gradle Wrapper 及其配置应提交到 Git；不要提交本机生成的 `local
 ### 3. 首次构建
 
 ```bash
-cd /Users/zane/workspace/project/capture2doc/android
+cd /Users/zane/workspace/project/capture2doc-android/android
 
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 ANDROID_HOME="/Users/zane/Library/Android/sdk" \
@@ -116,7 +118,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ## Android Studio 设置
 
-用 Android Studio 打开 `/Users/zane/workspace/project/capture2doc/android`，不要只打开 `app` 子目录。
+用 Android Studio 打开仓库中的 `android/` 目录（当前 checkout 为 `/Users/zane/workspace/project/capture2doc-android/android`），不要只打开 `app` 子目录。
 
 Gradle JDK 选择 Android Studio 的 Embedded JDK。若 IDE 没有自动识别 SDK，可在本机的 `local.properties` 中设置：
 
@@ -177,9 +179,9 @@ app/build/outputs/apk/debug/app-debug.apk
 -n io.github.liuzijiancs.capture2doc/.MainActivity
 ```
 
-首轮真机检查至少覆盖：冷启动、浅色/深色模式、横竖屏切换、返回手势和字体缩放。CameraX 探针还需覆盖权限拒绝与重新授权、横竖屏拍照、切入后台、连续拍摄和结果尺寸核对，详细清单见 [Android 相机测试与验收](android_camera_testing.md)。
+首轮真机检查至少覆盖：冷启动、浅色/深色模式、横竖屏切换、返回手势和字体缩放。相机流程还需覆盖权限拒绝与重新授权、横竖屏拍照、切入后台、连续拍摄、结果尺寸，以及候选点按大图、双击删除、长按排序和“完成”进入本地整理页，详细清单见 [Android 相机测试与验收](android_camera_testing.md)。
 
-当前 4:3 低延迟 CameraX Debug APK 已在连接的 Android 真机上完成冷启动、权限说明、后置摄像头绑定、8 个自动化连接测试，以及真实快门、近远点对焦、横竖屏与反向方向、1280 像素 OCR 派生图核对和 20 张性能验收。实际拍摄分辨率和 postview 支持情况仍由运行时能力决定。
+改造前的 4:3 低延迟 CameraX Debug APK 已在 Android 真机上完成冷启动、权限说明、后置摄像头绑定、8 个自动化连接测试，以及真实快门、近远点对焦、横竖屏与反向方向、1280 像素 OCR 派生图核对和 20 张性能验收。实际拍摄分辨率和 postview 支持情况仍由运行时能力决定；2026-09-04 实现的新相机 UI 尚未进行这轮真机验收。
 
 ### 相机权限复测
 
@@ -190,11 +192,14 @@ app/build/outputs/apk/debug/app-debug.apk
 io.github.liuzijiancs.capture2doc android.permission.CAMERA
 ```
 
-调试构建可以通过 `run-as` 检查 App 私有目录中的原图和压缩图：
+调试构建可以通过 `run-as` 检查 App 私有扫描草稿清单及页面目录：
 
 ```bash
 /Users/zane/Library/Android/sdk/platform-tools/adb shell run-as \
-io.github.liuzijiancs.capture2doc ls -lh files/captures
+io.github.liuzijiancs.capture2doc ls -lh files/scan_draft
+
+/Users/zane/Library/Android/sdk/platform-tools/adb shell run-as \
+io.github.liuzijiancs.capture2doc ls -lh files/scan_draft/pages
 ```
 
 ## 常见问题

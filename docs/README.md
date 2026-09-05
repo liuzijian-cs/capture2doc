@@ -1,6 +1,6 @@
 # Capture2Doc 文档
 
-Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初步架构、模型选型过程和后续验证标准；其中描述的是计划能力，而不是已经交付的功能。
+Capture2Doc 当前处于设计与原型验证阶段。这里同时记录已经落地的 Android 本地能力、目标架构、模型选型过程和后续验证标准；各文档通过状态段落区分当前实现与未来能力。
 
 ## 文档索引
 
@@ -8,6 +8,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 - [Android App 产品与架构草案](android_app.md)：对话式宿主 App、工具系统、Capture2Doc 功能边界、Android 视觉主题和下一里程碑。
 - [Android 开发环境](android_env.md)：工具链版本、首次初始化、构建、检查和通用真机调试。
 - [Android 相机架构与状态管理](android_camera_architecture.md)：模块边界、状态机、并发、文件和生命周期。
+- [Android 扫描草稿与恢复说明](android_scan_draft.md)：单草稿事实模型、页面状态、文件结构和进程恢复规则。
 - [Android 相机拍摄与图像处理](android_camera_capture.md)：CameraX 配置、4:3 取景、对焦、方向、低延迟和 1280 像素选型。
 - [Android 相机测试与验收](android_camera_testing.md)：自动化覆盖、通用真机清单、性能指标和 OCR 输入对照。
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
@@ -17,6 +18,9 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录项目的初�
 ## 当前决策
 
 - 系统边界：Android App 负责拍照/视频采集和页面预处理，本地服务端接收页面图片流并完成解析、组装和导出。
+- Android 当前阶段：CameraX、本地单草稿、页面整理、稳定 viewport、overlay 候选条和底部控件已经实现。最终修复后的 JVM 测试、Debug 构建、Lint 和设备测试 APK 构建通过；当前没有连接设备，新 UI 真机验收待执行。
+- 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页“完成”暂时只进入本地页面整理页，不代表上传或文档任务完成。
+- 后续处理方向：上传载荷就绪后以稳定 `pageId` 幂等提交，上传成功立即进入页面级 OCR，最终提交有序 `pageId` 数组后再启动文档级 VLM；当前尚未实现网络链路，具体上传载荷、鉴权、重试和跨进程上传恢复细节仍待冻结。
 - 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B 4-bit，Apple Silicon 默认 4B 4-bit。
 - 中间表示：C2D-XML v0.1 标签基线已经冻结，只保留最终文档的逻辑结构、内容、顺序和有限行内样式；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。下一步编写对应 XSD。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。

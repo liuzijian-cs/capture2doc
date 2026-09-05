@@ -6,9 +6,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import io.github.liuzijiancs.capture2doc.core.model.ScanPageState
+import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraCandidateUi
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraGateState
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraProbeContent
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CameraProbeTags
@@ -18,10 +24,9 @@ import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.CaptureStage
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.FocusIndicatorState
 import io.github.liuzijiancs.capture2doc.feature.capture2doc.camera.FocusStatus
 import io.github.liuzijiancs.capture2doc.ui.theme.Capture2DocTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 
 class CameraProbeContentTest {
     @get:Rule
@@ -49,38 +54,44 @@ class CameraProbeContentTest {
     }
 
     @Test
-    fun capturePendingKeepsPreviewAndShutterVisible() {
-        state = CameraProbeUiState(
-            gate = CameraGateState.Ready,
-            captureJobs = listOf(testJob("one", CaptureStage.SAVING)),
-        )
+    fun candidateStripDoesNotChangeViewportBounds() {
+        state = CameraProbeUiState(gate = CameraGateState.Ready)
         setProbeContent(cameraSessionAvailable = true)
+        val emptyBounds = composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT)
+            .getUnclippedBoundsInRoot()
 
-        composeRule.onNodeWithTag(CameraProbeTags.READY).assertIsDisplayed()
+        updateState(
+            CameraProbeUiState(
+                gate = CameraGateState.Ready,
+                candidates = listOf(
+                    testCandidate("one", pageNumber = 1),
+                    testCandidate("two", pageNumber = 2),
+                    testCandidate("three", pageNumber = 3),
+                ),
+            ),
+        )
+
         composeRule.onNodeWithTag(CameraProbeTags.THUMBNAILS).assertIsDisplayed()
-        composeRule.onNodeWithTag(CameraProbeTags.SHUTTER)
-            .assertIsDisplayed()
-            .assertIsEnabled()
+        val populatedBounds = composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT)
+            .getUnclippedBoundsInRoot()
+        assertEquals(emptyBounds, populatedBounds)
     }
 
     @Test
-    fun portraitViewportIsThreeByFourAndDoesNotOverlapControls() {
+    fun portraitViewportIsThreeByFour() {
         state = CameraProbeUiState(gate = CameraGateState.Ready)
         setProbeContent(cameraSessionAvailable = true)
 
         val viewportBounds = composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT)
             .getUnclippedBoundsInRoot()
-        val controlsBounds = composeRule.onNodeWithTag(CameraProbeTags.CONTROLS)
-            .getUnclippedBoundsInRoot()
-
         val viewportWidth = viewportBounds.right - viewportBounds.left
         val viewportHeight = viewportBounds.bottom - viewportBounds.top
+
         assertEquals(3f / 4f, viewportWidth / viewportHeight, 0.01f)
-        assertTrue(viewportBounds.bottom <= controlsBounds.top)
     }
 
     @Test
-    fun landscapeViewportIsFourByThreeAndDoesNotOverlapControls() {
+    fun landscapeViewportIsFourByThree() {
         state = CameraProbeUiState(gate = CameraGateState.Ready)
         setProbeContent(
             cameraSessionAvailable = true,
@@ -89,17 +100,29 @@ class CameraProbeContentTest {
 
         val viewportBounds = composeRule.onNodeWithTag(CameraProbeTags.VIEWPORT)
             .getUnclippedBoundsInRoot()
-        val controlsBounds = composeRule.onNodeWithTag(CameraProbeTags.CONTROLS)
-            .getUnclippedBoundsInRoot()
         val viewportWidth = viewportBounds.right - viewportBounds.left
         val viewportHeight = viewportBounds.bottom - viewportBounds.top
 
         assertEquals(4f / 3f, viewportWidth / viewportHeight, 0.01f)
-        assertTrue(viewportBounds.right <= controlsBounds.left)
     }
 
     @Test
-    fun thirdPendingCaptureDisablesShutterWithoutCoveringPreview() {
+    fun shutterIsHorizontallyCentered() {
+        state = CameraProbeUiState(gate = CameraGateState.Ready)
+        setProbeContent(cameraSessionAvailable = true)
+
+        val screenBounds = composeRule.onNodeWithTag(CameraProbeTags.SCREEN)
+            .getUnclippedBoundsInRoot()
+        val shutterBounds = composeRule.onNodeWithTag(CameraProbeTags.SHUTTER)
+            .getUnclippedBoundsInRoot()
+        val screenCenterX = (screenBounds.left.value + screenBounds.right.value) / 2f
+        val shutterCenterX = (shutterBounds.left.value + shutterBounds.right.value) / 2f
+
+        assertEquals(screenCenterX, shutterCenterX, 0.5f)
+    }
+
+    @Test
+    fun thirdPendingCaptureOnlyDisablesShutterAndShowsNoDebugCopy() {
         state = CameraProbeUiState(
             gate = CameraGateState.Ready,
             captureJobs = listOf(
@@ -111,14 +134,126 @@ class CameraProbeContentTest {
         setProbeContent(cameraSessionAvailable = true)
 
         composeRule.onNodeWithTag(CameraProbeTags.READY).assertIsDisplayed()
-        composeRule.onNodeWithTag(CameraProbeTags.QUEUE_FULL).assertIsDisplayed()
         composeRule.onNodeWithTag(CameraProbeTags.SHUTTER).assertIsNotEnabled()
+        composeRule.onNodeWithText("相机能力测试").assertDoesNotExist()
+        composeRule.onNodeWithText("已拍", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("保存中", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("正在保存 3 张照片，请稍候…").assertDoesNotExist()
     }
 
     @Test
-    fun rendersFocusIndicatorAndFailureResults() {
+    fun finishRequiresAtLeastOneCandidateWithASafelyPersistedOriginal() {
+        state = CameraProbeUiState(gate = CameraGateState.Ready, draftReady = true)
+        setProbeContent(cameraSessionAvailable = true)
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsNotEnabled()
+
+        updateState(
+            CameraProbeUiState(
+                gate = CameraGateState.Ready,
+                draftReady = true,
+                candidates = listOf(
+                    testCandidate(
+                        pageId = "normalizing",
+                        state = ScanPageState.NORMALIZING,
+                        hasSafeOriginal = true,
+                    ),
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsEnabled()
+
+        updateState(
+            CameraProbeUiState(
+                gate = CameraGateState.Ready,
+                draftReady = true,
+                candidates = listOf(
+                    testCandidate(
+                        pageId = "capturing",
+                        state = ScanPageState.CAPTURING,
+                        hasSafeOriginal = false,
+                    ),
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsNotEnabled()
+
+        updateState(
+            CameraProbeUiState(
+                gate = CameraGateState.Ready,
+                draftReady = true,
+                candidates = listOf(
+                    testCandidate(
+                        pageId = "failed",
+                        state = ScanPageState.FAILED,
+                        hasSafeOriginal = true,
+                    ),
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsEnabled()
+
+        updateState(
+            CameraProbeUiState(
+                gate = CameraGateState.Ready,
+                draftReady = true,
+                candidates = listOf(
+                    testCandidate(
+                        pageId = "failed-without-original",
+                        state = ScanPageState.FAILED,
+                        hasSafeOriginal = false,
+                    ),
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(CameraProbeTags.FINISH).assertIsNotEnabled()
+    }
+
+    @Test
+    fun singleTapCandidateOpensPreview() {
         state = CameraProbeUiState(
             gate = CameraGateState.Ready,
+            candidates = listOf(testCandidate("one")),
+        )
+        setProbeContent(cameraSessionAvailable = true)
+
+        composeRule.onNodeWithTag(CameraProbeTags.candidate("one"))
+            .performTouchInput { click() }
+
+        composeRule.onNodeWithTag(CameraProbeTags.PREVIEW).assertIsDisplayed()
+    }
+
+    @Test
+    fun doubleTapCandidateDeletesExactlyOnce() {
+        var deletedPageIds = emptyList<String>()
+        state = CameraProbeUiState(
+            gate = CameraGateState.Ready,
+            candidates = listOf(testCandidate("one")),
+        )
+        setProbeContent(
+            cameraSessionAvailable = true,
+            onDeleteCandidate = { deletedPageIds = deletedPageIds + it },
+        )
+
+        composeRule.onNodeWithTag(CameraProbeTags.candidate("one"))
+            .performTouchInput { doubleClick() }
+
+        composeRule.runOnIdle {
+            assertEquals(listOf("one"), deletedPageIds)
+        }
+        composeRule.onNodeWithTag(CameraProbeTags.PREVIEW).assertDoesNotExist()
+    }
+
+    @Test
+    fun rendersFailedCandidateAndFocusIndicator() {
+        state = CameraProbeUiState(
+            gate = CameraGateState.Ready,
+            candidates = listOf(
+                testCandidate(
+                    pageId = "failed",
+                    state = ScanPageState.FAILED,
+                    hasSafeOriginal = false,
+                ),
+            ),
             focusIndicator = FocusIndicatorState(
                 requestId = 1,
                 x = 100f,
@@ -127,26 +262,15 @@ class CameraProbeContentTest {
             ),
         )
         setProbeContent(cameraSessionAvailable = true)
-        composeRule.onNodeWithTag(CameraProbeTags.FOCUS).assertIsDisplayed()
 
-        updateState(
-            CameraProbeUiState(
-                gate = CameraGateState.Ready,
-                captureJobs = listOf(
-                    testJob("failed", CaptureStage.FAILED).copy(
-                        errorMessage = "保存失败",
-                    ),
-                ),
-                finishRequested = true,
-                showResults = true,
-            ),
-        )
-        composeRule.onNodeWithTag(CameraProbeTags.RESULTS).assertIsDisplayed()
+        composeRule.onNodeWithTag(CameraProbeTags.CANDIDATE_ERROR).assertIsDisplayed()
+        composeRule.onNodeWithTag(CameraProbeTags.FOCUS).assertIsDisplayed()
     }
 
     private fun setProbeContent(
         cameraSessionAvailable: Boolean,
         landscapeLayoutOverride: Boolean? = null,
+        onDeleteCandidate: (String) -> Unit = {},
     ) {
         composeRule.setContent {
             Capture2DocTheme {
@@ -156,12 +280,11 @@ class CameraProbeContentTest {
                     onBack = {},
                     onRequestPermission = {},
                     onOpenSettings = {},
-                    onCapture = { true },
+                    onCapture = {},
                     onFinish = {},
-                    onContinue = {},
+                    onDeleteCandidate = onDeleteCandidate,
+                    onMoveCandidate = { _, _ -> },
                     onRetryCamera = {},
-                    onRetryJob = {},
-                    onRemoveJob = {},
                     onFocus = { _, _ -> },
                     onClearFocus = {},
                     cameraPreview = {},
@@ -178,6 +301,22 @@ class CameraProbeContentTest {
     private fun assertState(tag: String) {
         composeRule.onNodeWithTag(tag).assertIsDisplayed()
     }
+
+    private fun testCandidate(
+        pageId: String,
+        pageNumber: Int = 1,
+        state: ScanPageState = ScanPageState.READY,
+        hasSafeOriginal: Boolean = true,
+        canDelete: Boolean = state != ScanPageState.CAPTURING,
+    ) = CameraCandidateUi(
+        pageId = pageId,
+        pageNumber = pageNumber,
+        originalPath = "/not-present/$pageId/original.jpg",
+        normalizedPath = "/not-present/$pageId/normalized_1280.jpg",
+        state = state,
+        hasSafeOriginal = hasSafeOriginal,
+        canDelete = canDelete,
+    )
 
     private fun testJob(captureId: String, stage: CaptureStage) = CaptureJob(
         captureId = captureId,

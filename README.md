@@ -19,13 +19,18 @@ C2D-XML 是所有输出格式共享的唯一内容基线。v0.1 使用单一 `<d
 
 C2D-XML 不包含原始分页、坐标、来源追溯、图片、画板、分栏或平台专属资源。Lark 是首要输出目标；Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成节点和目标格式元数据。输出层只做确定性转换，不调用模型补写内容。
 
-上述完整处理方案仍是待验证的初始选型；仓库目前只提供可运行的 Android 骨架、CameraX 4:3 拍照/1280 像素 OCR 派生图探针和服务端基础代码，尚未形成端到端文档转换产品。这里的 1280 是派生图长边，不是 PaddleOCR 的 image-token 上限。详细设计、实现状态和选型依据请参阅：
+上述完整处理方案仍是待验证的初始选型；仓库目前提供可运行的 Android 骨架、CameraX 4:3 拍照/1280 像素 OCR 派生图链路、本地单草稿与页面整理基础能力，以及服务端基础代码，尚未形成端到端文档转换产品。这里的 1280 是派生图长边，不是 PaddleOCR 的 image-token 上限。
+
+2026-09-04 确定的 Android 沉浸式相机页已经实现：相机取景区域在拍照前后保持稳定，页面候选和底部控件以 overlay 叠加；候选支持点按大图、双击立即删除和长按排序，拍照页的“完成”暂时只进入本地页面整理页。最终修复后的 JVM 测试、Debug 构建、Lint 和设备测试 APK 构建已经通过；当前没有连接设备，因此新 UI 的连接测试和真机验收尚未执行。当前版本仍不上传图片；未来接入服务端时，上传载荷就绪后以稳定 `pageId` 幂等提交，上传成功立即进入页面级 OCR，最终整理完成时再提交有序 `pageId` 数组并启动文档级 VLM。原图或派生图作为具体上传载荷仍待联调阶段确定。
+
+详细设计、实现状态和选型依据请参阅：
 
 - [项目文档索引](docs/README.md)
 - [总体方案](docs/architecture.md)
 - [Android App 产品与架构草案](docs/android_app.md)
 - [Android 开发环境](docs/android_env.md)
 - [Android 相机架构与状态管理](docs/android_camera_architecture.md)
+- [Android 扫描草稿与恢复说明](docs/android_scan_draft.md)
 - [Android 相机拍摄与图像处理](docs/android_camera_capture.md)
 - [Android 相机测试与验收](docs/android_camera_testing.md)
 - [C2D-XML 标签体系](docs/c2d_xml.md)

@@ -9,22 +9,27 @@ import androidx.camera.core.ImageCaptureException
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.liuzijiancs.capture2doc.Capture2DocApplication
 import io.github.liuzijiancs.capture2doc.R
 import io.github.liuzijiancs.capture2doc.core.model.CaptureArtifact
 import io.github.liuzijiancs.capture2doc.core.model.CaptureTimings
-import io.github.liuzijiancs.capture2doc.data.capture2doc.image.ImageNormalizer
+import io.github.liuzijiancs.capture2doc.core.model.SCAN_PAGE_INVALID_ORIGINAL_MESSAGE
+import io.github.liuzijiancs.capture2doc.core.model.ScanPage
+import io.github.liuzijiancs.capture2doc.core.model.ScanPageState
 import io.github.liuzijiancs.capture2doc.data.capture2doc.image.ImageSize
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal sealed interface CameraGateState {
@@ -65,36 +70,112 @@ internal data class CaptureJob(
     val errorMessage: String? = null,
 )
 
+internal data class CameraCandidateUi(
+    val pageId: String,
+    val pageNumber: Int,
+    val originalPath: String,
+    val normalizedPath: String,
+    val state: ScanPageState,
+    val postviewBitmap: Bitmap? = null,
+    val hasSafeOriginal: Boolean = false,
+    val canDelete: Boolean = false,
+    val errorMessage: String? = null,
+)
+
 internal data class CameraProbeUiState(
     val gate: CameraGateState = CameraGateState.PermissionRequired,
     internal val captureJobs: List<CaptureJob> = emptyList(),
+    internal val candidates: List<CameraCandidateUi> = emptyList(),
     internal val focusIndicator: FocusIndicatorState? = null,
     val captureResolution: ImageSize? = null,
     val postviewSupported: Boolean = false,
-    val finishRequested: Boolean = false,
-    val showResults: Boolean = false,
+    val draftReady: Boolean = false,
+    val draftMutationInProgress: Boolean = false,
+    val retakePreparationInProgress: Boolean = false,
 ) {
     internal val canCapture: Boolean
         get() = gate is CameraGateState.Ready &&
-            !finishRequested &&
+            draftReady &&
+            !retakePreparationInProgress &&
+            !draftMutationInProgress &&
             canAcceptCapture(captureJobs.map(CaptureJob::stage))
 
-    internal val pendingSaveCount: Int
-        get() = captureJobs.count { it.stage.countsAgainstCaptureLimit }
+    internal val canFinish: Boolean
+        get() = draftReady &&
+            !retakePreparationInProgress &&
+            canFinishCandidates(candidates, draftMutationInProgress) &&
+            captureJobs.none { it.stage.countsAgainstCaptureLimit } &&
+            captureJobs.filter { it.stage == CaptureStage.NORMALIZING }.all { job ->
+                candidates.any { candidate ->
+                    candidate.pageId == job.captureId && candidate.hasSafeOriginal
+                }
+            }
 
-    internal val pendingWorkCount: Int
-        get() = captureJobs.count { !it.stage.isTerminal }
+    internal val hasAcceptedCaptureOrPage: Boolean
+        get() = candidates.isNotEmpty() || captureJobs.any { !it.stage.isTerminal }
 }
+
+internal fun canFinishCandidates(
+    candidates: List<CameraCandidateUi>,
+    mutationInProgress: Boolean = false,
+): Boolean = !mutationInProgress &&
+    candidates.isNotEmpty() &&
+    candidates.all { candidate ->
+        candidate.hasSafeOriginal &&
+            (candidate.state == ScanPageState.NORMALIZING ||
+                candidate.state == ScanPageState.READY ||
+                candidate.state == ScanPageState.FAILED)
+    }
 
 internal class CameraProbeViewModel(
     application: Application,
 ) : AndroidViewModel(application) {
-    private val imageNormalizer = ImageNormalizer()
-    private val normalizationMutex = Mutex()
+    private val draftRepository = getApplication<Capture2DocApplication>().scanDraftRepository
     private val _uiState = MutableStateFlow(CameraProbeUiState())
+    private val normalizationJobs = mutableMapOf<String, Job>()
+    private val tombstonedPageIds = mutableSetOf<String>()
+    private val pendingDeletedPageIds = mutableSetOf<String>()
+    private val reservationInFlightPageIds = mutableSetOf<String>()
+    private var retakeInFlightPageId: String? = null
+    private var draftPages: List<ScanPage> = emptyList()
+    private var repositoryInitialized = false
+    private var draftMutationCount = 0
     private var nextFocusRequestId = 0L
+    private var requestedRetakePageId: String? = null
+    private var retakePageId: String? = null
 
     val uiState = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            draftRepository.draft.collect { draft ->
+                draftPages = draft?.pages.orEmpty()
+                resolveRetakePage()
+                publishCandidates()
+                if (repositoryInitialized) reconcileTransientJobs()
+            }
+        }
+        viewModelScope.launch {
+            try {
+                draftRepository.initialize()
+                draftRepository.recoverIncompletePages()
+                repositoryInitialized = true
+                draftPages = draftRepository.draft.value?.pages.orEmpty()
+                resolveRetakePage()
+                _uiState.update { it.copy(draftReady = true) }
+                publishCandidates()
+                reconcileTransientJobs()
+            } catch (error: Exception) {
+                onCameraError(error)
+            }
+        }
+    }
+
+    fun initializeSession(requestedRetakePageId: String?) {
+        this.requestedRetakePageId = requestedRetakePageId
+        resolveRetakePage()
+        publishCandidates()
+    }
 
     fun synchronizePermission(granted: Boolean) {
         val current = _uiState.value
@@ -118,273 +199,341 @@ internal class CameraProbeViewModel(
     }
 
     fun onPermissionRequestStarted() {
-        _uiState.value = _uiState.value.copy(
-            gate = CameraGateState.RequestingPermission,
-        )
+        _uiState.update { it.copy(gate = CameraGateState.RequestingPermission) }
     }
 
     fun onPermissionResult(granted: Boolean) {
-        _uiState.value = _uiState.value.copy(
-            gate = if (granted) {
-                CameraGateState.StartingCamera
-            } else {
-                CameraGateState.PermissionDenied
-            },
-        )
+        _uiState.update {
+            it.copy(
+                gate = if (granted) {
+                    CameraGateState.StartingCamera
+                } else {
+                    CameraGateState.PermissionDenied
+                },
+            )
+        }
     }
 
     fun onCameraReady(
         resolution: Size?,
         postviewSupported: Boolean,
     ) {
-        _uiState.value = _uiState.value.copy(
-            gate = CameraGateState.Ready,
-            captureResolution = resolution?.let { ImageSize(it.width, it.height) },
-            postviewSupported = postviewSupported,
-        )
+        _uiState.update {
+            it.copy(
+                gate = CameraGateState.Ready,
+                captureResolution = resolution?.let { size ->
+                    ImageSize(size.width, size.height)
+                },
+                postviewSupported = postviewSupported,
+            )
+        }
     }
 
     fun onCameraStopped() {
-        val current = _uiState.value
-        if (!current.showResults && current.gate is CameraGateState.Ready) {
-            _uiState.value = current.copy(gate = CameraGateState.StartingCamera)
+        _uiState.update { current ->
+            if (current.gate is CameraGateState.Ready) {
+                current.copy(gate = CameraGateState.StartingCamera)
+            } else {
+                current
+            }
         }
     }
 
     fun onCameraUnavailable() {
-        _uiState.value = _uiState.value.copy(gate = CameraGateState.CameraUnavailable)
+        _uiState.update { it.copy(gate = CameraGateState.CameraUnavailable) }
     }
 
     fun onCameraError(error: Throwable) {
-        _uiState.value = _uiState.value.copy(
-            gate = CameraGateState.Error(
-                error.message ?: getApplication<Application>()
-                    .getString(R.string.camera_error_unknown),
-            ),
-        )
+        _uiState.update {
+            it.copy(
+                gate = CameraGateState.Error(
+                    error.message ?: getApplication<Application>()
+                        .getString(R.string.camera_error_unknown),
+                ),
+            )
+        }
     }
 
-    internal fun capture(session: CameraSessionHandle): Boolean {
-        val current = _uiState.value
-        if (!current.canCapture) return false
+    internal fun capture(session: CameraSessionHandle) {
+        if (!_uiState.value.canCapture) return
 
-        val captureId = createCaptureId()
-        val captureDirectory = File(
-            getApplication<Application>().filesDir,
-            "captures/$captureId",
-        )
-        val originalFile = File(captureDirectory, ORIGINAL_FILE_NAME)
-        val normalizedFile = File(captureDirectory, NORMALIZED_FILE_NAME)
-
-        if (!captureDirectory.mkdirs()) {
-            onCameraError(IllegalStateException("无法创建拍照目录：${captureDirectory.path}"))
-            return false
-        }
-
+        val shouldReplacePage = retakePageId != null
+        val captureId = retakePageId ?: createCaptureId()
+        retakePageId = null
+        val pageFiles = draftRepository.pageFiles(captureId)
         val requestedAt = SystemClock.elapsedRealtime()
-        val job = CaptureJob(
-            captureId = captureId,
-            captureDirectoryPath = captureDirectory.path,
-            originalPath = originalFile.path,
-            normalizedPath = normalizedFile.path,
-            stage = CaptureStage.QUEUED,
-            requestedAtElapsedMillis = requestedAt,
+        reservationInFlightPageIds += captureId
+        addOrReplaceJob(
+            CaptureJob(
+                captureId = captureId,
+                captureDirectoryPath = pageFiles.directoryPath,
+                originalPath = pageFiles.originalPath,
+                normalizedPath = pageFiles.normalizedPath,
+                stage = CaptureStage.QUEUED,
+                requestedAtElapsedMillis = requestedAt,
+            ),
         )
-        _uiState.value = current.copy(captureJobs = current.captureJobs + job)
 
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(originalFile).build()
-        session.imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(getApplication()),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onCaptureStarted() {
-                    updateJob(captureId) {
-                        if (it.stage.isTerminal) {
-                            it
-                        } else {
-                            it.copy(
-                                stage = it.stage.advanceTo(CaptureStage.CAPTURING),
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    draftRepository.reservePage(
+                        pageId = captureId,
+                        replaceExisting = shouldReplacePage,
+                    )
+                }
+            } catch (error: Exception) {
+                reservationInFlightPageIds -= captureId
+                if (shouldReplacePage) retakePageId = captureId
+                failJob(
+                    captureId = captureId,
+                    message = error.message ?: getApplication<Application>()
+                        .getString(R.string.camera_error_unknown),
+                )
+                return@launch
+            }
+            reservationInFlightPageIds -= captureId
+
+            if (captureId in tombstonedPageIds) {
+                runCatching { cleanupTombstonedPage(captureId) }
+                return@launch
+            }
+
+            val outputOptions = ImageCapture.OutputFileOptions.Builder(
+                File(pageFiles.originalPath),
+            ).build()
+            session.imageCapture.takePicture(
+                outputOptions,
+                ContextCompat.getMainExecutor(getApplication()),
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onCaptureStarted() {
+                        updateJob(captureId) { job ->
+                            job.copy(
+                                stage = job.stage.advanceTo(CaptureStage.CAPTURING),
                                 captureStartedAtElapsedMillis =
-                                    it.captureStartedAtElapsedMillis
+                                    job.captureStartedAtElapsedMillis
                                         ?: SystemClock.elapsedRealtime(),
                             )
                         }
                     }
-                }
 
-                override fun onCaptureProcessProgressed(progress: Int) {
-                    updateJob(captureId) {
-                        if (progress > 0 && !it.stage.isTerminal) {
-                            it.copy(stage = it.stage.advanceTo(CaptureStage.SAVING))
-                        } else {
-                            it
+                    override fun onCaptureProcessProgressed(progress: Int) {
+                        if (progress > 0) {
+                            updateJob(captureId) { job ->
+                                job.copy(stage = job.stage.advanceTo(CaptureStage.SAVING))
+                            }
                         }
                     }
-                }
 
-                override fun onPostviewBitmapAvailable(bitmap: Bitmap) {
-                    updateJob(captureId) {
-                        if (it.stage.isTerminal) {
-                            it
-                        } else {
-                            it.copy(
-                                stage = it.stage.advanceTo(CaptureStage.SAVING),
-                                postviewAtElapsedMillis = it.postviewAtElapsedMillis
+                    override fun onPostviewBitmapAvailable(bitmap: Bitmap) {
+                        updateJob(captureId) { job ->
+                            job.copy(
+                                stage = job.stage.advanceTo(CaptureStage.SAVING),
+                                postviewAtElapsedMillis = job.postviewAtElapsedMillis
                                     ?: SystemClock.elapsedRealtime(),
                                 postviewBitmap = bitmap,
                             )
                         }
                     }
-                }
 
-                override fun onImageSaved(
-                    outputFileResults: ImageCapture.OutputFileResults,
-                ) {
-                    val savedAt = SystemClock.elapsedRealtime()
-                    updateJob(captureId) {
-                        if (it.stage.isTerminal) {
-                            it
-                        } else {
-                            it.copy(
-                                stage = it.stage.advanceTo(CaptureStage.NORMALIZING),
-                                imageSavedAtElapsedMillis = it.imageSavedAtElapsedMillis
-                                    ?: savedAt,
+                    override fun onImageSaved(
+                        outputFileResults: ImageCapture.OutputFileResults,
+                    ) {
+                        if (captureId in tombstonedPageIds) {
+                            viewModelScope.launch {
+                                runCatching { cleanupTombstonedPage(captureId) }
+                            }
+                            return
+                        }
+                        val savedAt = SystemClock.elapsedRealtime()
+                        updateJob(captureId) { job ->
+                            job.copy(
+                                stage = job.stage.advanceTo(CaptureStage.SAVING),
+                                imageSavedAtElapsedMillis =
+                                    job.imageSavedAtElapsedMillis ?: savedAt,
                             )
                         }
+                        startNormalization(captureId)
                     }
-                    val shouldNormalize = _uiState.value.captureJobs
-                        .firstOrNull { it.captureId == captureId }
-                        ?.stage == CaptureStage.NORMALIZING
-                    if (shouldNormalize) {
-                        normalizeCapture(captureId)
+
+                    override fun onError(exception: ImageCaptureException) {
+                        onCaptureError(
+                            captureId = captureId,
+                            message = exception.message?.takeIf(String::isNotBlank)
+                                ?: getApplication<Application>()
+                                    .getString(R.string.camera_error_unknown),
+                            clearDirectory = true,
+                        )
                     }
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    originalFile.delete()
-                    normalizedFile.delete()
-                    captureDirectory.delete()
-                    failJob(
-                        captureId = captureId,
-                        message = exception.message?.takeIf(String::isNotBlank)
-                            ?: getApplication<Application>()
-                                .getString(R.string.camera_error_unknown),
-                    )
-                }
-            },
-        )
-        return true
+                },
+            )
+        }
     }
 
-    fun onFinishRequested() {
-        val current = _uiState.value
-        if (current.captureJobs.isEmpty()) return
-        _uiState.value = current.copy(finishRequested = true)
-        completeFinishIfReady()
-    }
-
-    fun continueCapturing() {
-        _uiState.value = _uiState.value.copy(
-            gate = CameraGateState.StartingCamera,
-            finishRequested = false,
-            showResults = false,
-        )
-    }
-
-    fun retryJob(captureId: String) {
-        val job = _uiState.value.captureJobs.firstOrNull { it.captureId == captureId }
+    fun deleteCandidate(pageId: String) {
+        val candidate = _uiState.value.candidates.firstOrNull { it.pageId == pageId }
             ?: return
-        if (job.stage != CaptureStage.FAILED) return
-
-        val originalFile = File(job.originalPath)
-        if (!originalFile.isFile) {
-            removeJob(captureId)
-            continueCapturing()
+        if (
+            !candidate.canDelete ||
+            _uiState.value.draftMutationInProgress ||
+            pageId in reservationInFlightPageIds ||
+            _uiState.value.captureJobs.any {
+                it.captureId == pageId && it.stage.countsAgainstCaptureLimit
+            }
+        ) {
             return
         }
 
-        File(job.normalizedPath).delete()
-        updateJob(captureId) {
-            it.copy(
-                stage = CaptureStage.NORMALIZING,
-                errorMessage = null,
-                artifact = null,
-            )
+        tombstonedPageIds += pageId
+        pendingDeletedPageIds += pageId
+        beginDraftMutation()
+        publishCandidates()
+        viewModelScope.launch {
+            var deleted = false
+            try {
+                deleted = runCatching { draftRepository.deletePage(pageId) }
+                    .getOrDefault(false)
+                if (deleted) {
+                    normalizationJobs.remove(pageId)?.cancelAndJoin()
+                }
+            } finally {
+                if (deleted) {
+                    runCatching { cleanupTombstonedPage(pageId) }
+                    removeJob(pageId)
+                } else {
+                    tombstonedPageIds -= pageId
+                }
+                pendingDeletedPageIds -= pageId
+                endDraftMutation()
+                publishCandidates()
+            }
         }
-        normalizeCapture(captureId)
     }
 
-    fun removeJob(captureId: String) {
-        val current = _uiState.value
-        val job = current.captureJobs.firstOrNull { it.captureId == captureId } ?: return
-        val remainingJobs = current.captureJobs.filterNot { it.captureId == captureId }
-        _uiState.value = current.copy(
-            captureJobs = remainingJobs,
-            showResults = current.showResults && remainingJobs.isNotEmpty(),
-            finishRequested = current.finishRequested && remainingJobs.isNotEmpty(),
-        )
-        viewModelScope.launch(Dispatchers.IO) {
-            File(job.captureDirectoryPath).deleteRecursively()
+    fun moveCandidate(pageId: String, targetIndex: Int) {
+        val candidates = _uiState.value.candidates
+        if (
+            _uiState.value.draftMutationInProgress ||
+            candidates.none { it.pageId == pageId } ||
+            targetIndex !in candidates.indices
+        ) {
+            return
+        }
+        beginDraftMutation()
+        viewModelScope.launch {
+            try {
+                runCatching { draftRepository.movePage(pageId, targetIndex) }
+            } finally {
+                endDraftMutation()
+            }
+        }
+    }
+
+    fun prepareRetake(pageId: String, onPrepared: (Boolean) -> Unit) {
+        val page = draftPages.firstOrNull { it.pageId == pageId }
+        if (
+            page == null ||
+            page.state == ScanPageState.CAPTURING ||
+            _uiState.value.captureJobs.any {
+                it.captureId == pageId && it.stage.countsAgainstCaptureLimit
+            } ||
+            retakeInFlightPageId != null
+        ) {
+            onPrepared(false)
+            return
+        }
+        retakeInFlightPageId = pageId
+        _uiState.update { it.copy(retakePreparationInProgress = true) }
+        viewModelScope.launch {
+            try {
+                val prepared = runCatching {
+                    normalizationJobs.remove(pageId)?.cancelAndJoin()
+                    val result = draftRepository.prepareRetake(pageId)
+                    if (result) removeJob(pageId)
+                    result
+                }.getOrElse { false }
+                onPrepared(prepared)
+            } finally {
+                if (retakeInFlightPageId == pageId) retakeInFlightPageId = null
+                _uiState.update { it.copy(retakePreparationInProgress = false) }
+            }
         }
     }
 
     fun retryCamera() {
-        _uiState.value = _uiState.value.copy(
-            gate = CameraGateState.StartingCamera,
-            showResults = false,
-            finishRequested = false,
-        )
+        _uiState.update { it.copy(gate = CameraGateState.StartingCamera) }
     }
+
+    fun canFinishNow(): Boolean = _uiState.value.canFinish
 
     fun onFocusStarted(x: Float, y: Float): Long {
         val requestId = ++nextFocusRequestId
-        _uiState.value = _uiState.value.copy(
-            focusIndicator = FocusIndicatorState(
-                requestId = requestId,
-                x = x,
-                y = y,
-                status = FocusStatus.FOCUSING,
-            ),
-        )
+        _uiState.update {
+            it.copy(
+                focusIndicator = FocusIndicatorState(
+                    requestId = requestId,
+                    x = x,
+                    y = y,
+                    status = FocusStatus.FOCUSING,
+                ),
+            )
+        }
         return requestId
     }
 
     fun onFocusResult(requestId: Long, successful: Boolean) {
-        val current = _uiState.value
-        val focus = current.focusIndicator
-        if (focus?.requestId != requestId) return
-        _uiState.value = current.copy(
-            focusIndicator = focus.copy(
-                status = if (successful) FocusStatus.SUCCESS else FocusStatus.FAILED,
-            ),
-        )
-    }
-
-    fun clearFocusIndicator(requestId: Long) {
-        val current = _uiState.value
-        if (current.focusIndicator?.requestId == requestId) {
-            _uiState.value = current.copy(focusIndicator = null)
+        _uiState.update { current ->
+            val focus = current.focusIndicator
+            if (focus?.requestId != requestId) {
+                current
+            } else {
+                current.copy(
+                    focusIndicator = focus.copy(
+                        status = if (successful) FocusStatus.SUCCESS else FocusStatus.FAILED,
+                    ),
+                )
+            }
         }
     }
 
-    private fun normalizeCapture(captureId: String) {
-        viewModelScope.launch {
-            val job = _uiState.value.captureJobs.firstOrNull { it.captureId == captureId }
+    fun clearFocusIndicator(requestId: Long) {
+        _uiState.update { current ->
+            if (current.focusIndicator?.requestId == requestId) {
+                current.copy(focusIndicator = null)
+            } else {
+                current
+            }
+        }
+    }
+
+    private fun startNormalization(captureId: String) {
+        normalizationJobs.remove(captureId)?.cancel()
+        val task = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val captureJob = _uiState.value.captureJobs
+                .firstOrNull { it.captureId == captureId }
                 ?: return@launch
             try {
-                val result = withContext(Dispatchers.IO) {
-                    normalizationMutex.withLock {
-                        imageNormalizer.normalize(
-                            source = File(job.originalPath),
-                            destination = File(job.normalizedPath),
-                        )
-                    }
+                if (!draftRepository.hasValidOriginal(captureId)) {
+                    markCaptureFailed(
+                        captureId = captureId,
+                        message = SCAN_PAGE_INVALID_ORIGINAL_MESSAGE,
+                        clearDirectory = false,
+                    )
+                    return@launch
                 }
+                draftRepository.markNormalizing(captureId)
+                updateJob(captureId) { job ->
+                    job.copy(stage = job.stage.advanceTo(CaptureStage.NORMALIZING))
+                }
+                val result = draftRepository.normalizePage(captureId)
+                if (captureId in tombstonedPageIds) {
+                    runCatching { cleanupTombstonedPage(captureId) }
+                    return@launch
+                }
+
                 val latestJob = _uiState.value.captureJobs
                     .firstOrNull { it.captureId == captureId }
                     ?: return@launch
-                val imageSavedAt = latestJob.imageSavedAtElapsedMillis
-                    ?: SystemClock.elapsedRealtime()
                 val artifact = CaptureArtifact(
                     captureId = captureId,
                     originalPath = latestJob.originalPath,
@@ -402,69 +551,231 @@ internal class CameraProbeViewModel(
                             ?.minus(latestJob.requestedAtElapsedMillis),
                         requestToPostviewMillis = latestJob.postviewAtElapsedMillis
                             ?.minus(latestJob.requestedAtElapsedMillis),
-                        requestToImageSavedMillis = imageSavedAt -
-                            latestJob.requestedAtElapsedMillis,
+                        requestToImageSavedMillis = (
+                            latestJob.imageSavedAtElapsedMillis
+                                ?: SystemClock.elapsedRealtime()
+                            ) - latestJob.requestedAtElapsedMillis,
                         normalizationMillis = result.processingDurationMillis,
                     ),
                 )
-                updateJob(captureId) {
-                    it.copy(
+                draftRepository.markReady(captureId)
+                updateJob(captureId) { job ->
+                    job.copy(
                         stage = CaptureStage.READY,
                         postviewBitmap = null,
                         artifact = artifact,
                         errorMessage = null,
                     )
                 }
-                completeFinishIfReady()
             } catch (cancelled: CancellationException) {
-                throw cancelled
+                if (captureId in tombstonedPageIds) {
+                    runCatching { cleanupTombstonedPage(captureId) }
+                } else {
+                    throw cancelled
+                }
             } catch (error: Exception) {
-                File(job.normalizedPath).delete()
-                failJob(
-                    captureId = captureId,
-                    message = error.message ?: getApplication<Application>()
-                        .getString(R.string.camera_error_unknown),
-                )
+                if (captureId in tombstonedPageIds) {
+                    runCatching { cleanupTombstonedPage(captureId) }
+                } else {
+                    File(captureJob.normalizedPath).delete()
+                    markCaptureFailed(
+                        captureId = captureId,
+                        message = error.message
+                            ?: getApplication<Application>()
+                                .getString(R.string.camera_error_unknown),
+                        clearDirectory = false,
+                    )
+                }
+            } finally {
+                if (normalizationJobs[captureId] === coroutineContext[Job]) {
+                    normalizationJobs.remove(captureId)
+                }
             }
+        }
+        normalizationJobs[captureId] = task
+        task.start()
+    }
+
+    private fun onCaptureError(
+        captureId: String,
+        message: String,
+        clearDirectory: Boolean,
+    ) {
+        if (captureId in tombstonedPageIds) {
+            viewModelScope.launch {
+                runCatching { cleanupTombstonedPage(captureId) }
+            }
+            return
+        }
+        updateJob(captureId) { job ->
+            job.copy(
+                stage = CaptureStage.FAILED,
+                postviewBitmap = null,
+                errorMessage = message,
+            )
+        }
+        viewModelScope.launch {
+            markCaptureFailed(captureId, message, clearDirectory)
         }
     }
 
-    private fun failJob(captureId: String, message: String) {
-        updateJob(captureId) {
-            if (it.stage == CaptureStage.READY) {
-                it
-            } else {
-                it.copy(
-                    stage = CaptureStage.FAILED,
-                    postviewBitmap = null,
-                    errorMessage = message,
-                )
-            }
+    private suspend fun markCaptureFailed(
+        captureId: String,
+        message: String,
+        clearDirectory: Boolean,
+    ) {
+        val originalIsValid = !clearDirectory &&
+            runCatching { draftRepository.hasValidOriginal(captureId) }.getOrDefault(false)
+        val effectiveMessage = if (!clearDirectory && !originalIsValid) {
+            SCAN_PAGE_INVALID_ORIGINAL_MESSAGE
+        } else {
+            message
         }
-        completeFinishIfReady()
+        _uiState.value.captureJobs
+            .firstOrNull { it.captureId == captureId }
+            ?.let { job ->
+                withContext(Dispatchers.IO) {
+                    File(job.normalizedPath).delete()
+                    if (clearDirectory || !originalIsValid) File(job.originalPath).delete()
+                }
+            }
+        updateJob(captureId) { job ->
+            job.copy(
+                stage = CaptureStage.FAILED,
+                postviewBitmap = null,
+                errorMessage = effectiveMessage,
+            )
+        }
+        runCatching { draftRepository.markFailed(captureId, effectiveMessage) }
+    }
+
+    private fun addOrReplaceJob(job: CaptureJob) {
+        _uiState.update { current ->
+            current.copy(
+                captureJobs = current.captureJobs.filterNot {
+                    it.captureId == job.captureId
+                } + job,
+            )
+        }
+        publishCandidates()
+    }
+
+    private fun failJob(captureId: String, message: String) {
+        updateJob(captureId) { job ->
+            job.copy(stage = CaptureStage.FAILED, errorMessage = message)
+        }
+        viewModelScope.launch { draftRepository.markFailed(captureId, message) }
     }
 
     private fun updateJob(
         captureId: String,
         transform: (CaptureJob) -> CaptureJob,
     ) {
-        val current = _uiState.value
-        val index = current.captureJobs.indexOfFirst { it.captureId == captureId }
-        if (index < 0) return
-        val jobs = current.captureJobs.toMutableList()
-        jobs[index] = transform(jobs[index])
-        _uiState.value = current.copy(captureJobs = jobs)
+        if (captureId in tombstonedPageIds) return
+        _uiState.update { current ->
+            val index = current.captureJobs.indexOfFirst { it.captureId == captureId }
+            if (index < 0) return@update current
+            val jobs = current.captureJobs.toMutableList()
+            jobs[index] = transform(jobs[index])
+            current.copy(captureJobs = jobs)
+        }
+        publishCandidates()
     }
 
-    private fun completeFinishIfReady() {
-        val current = _uiState.value
-        if (
-            current.finishRequested &&
-            current.captureJobs.isNotEmpty() &&
-            current.captureJobs.all { it.stage.isTerminal }
-        ) {
-            _uiState.value = current.copy(showResults = true)
+    private fun removeJob(captureId: String) {
+        _uiState.update { current ->
+            current.copy(
+                captureJobs = current.captureJobs.filterNot { it.captureId == captureId },
+            )
         }
+    }
+
+    private fun publishCandidates() {
+        _uiState.update { current ->
+            val jobsByPageId = current.captureJobs.associateBy(CaptureJob::captureId)
+            val candidates = draftPages
+                .filterNot { it.pageId in pendingDeletedPageIds }
+                .mapIndexed { index, page ->
+                    val job = jobsByPageId[page.pageId]
+                    val effectiveState = page.effectiveState(job)
+                    val original = draftRepository.resolve(page.originalRelativePath)
+                    val originalKnownValid =
+                        draftRepository.isOriginalKnownValid(page.pageId)
+                    val hasSafeOriginal = original.isFile && original.length() > 0L &&
+                        originalKnownValid &&
+                        (effectiveState == ScanPageState.NORMALIZING ||
+                            effectiveState == ScanPageState.READY ||
+                            effectiveState == ScanPageState.FAILED)
+                    CameraCandidateUi(
+                        pageId = page.pageId,
+                        pageNumber = index + 1,
+                        originalPath = original.path,
+                        normalizedPath = draftRepository.resolve(page.normalizedRelativePath).path,
+                        state = effectiveState,
+                        postviewBitmap = job?.postviewBitmap,
+                        hasSafeOriginal = hasSafeOriginal,
+                        canDelete = effectiveState != ScanPageState.CAPTURING &&
+                            !current.draftMutationInProgress,
+                        errorMessage = job?.errorMessage ?: page.errorMessage,
+                    )
+                }
+            current.copy(candidates = candidates)
+        }
+    }
+
+    private fun resolveRetakePage() {
+        retakePageId = requestedRetakePageId?.takeIf { pageId ->
+            draftPages.firstOrNull { it.pageId == pageId }?.state ==
+                ScanPageState.RETAKE_REQUIRED
+        }
+    }
+
+    private fun ScanPage.effectiveState(job: CaptureJob?): ScanPageState = when {
+        job?.stage == CaptureStage.QUEUED ||
+            job?.stage == CaptureStage.CAPTURING ||
+            job?.stage == CaptureStage.SAVING -> ScanPageState.CAPTURING
+        job?.stage == CaptureStage.FAILED -> ScanPageState.FAILED
+        job?.stage == CaptureStage.READY -> ScanPageState.READY
+        job?.stage == CaptureStage.NORMALIZING -> ScanPageState.NORMALIZING
+        state == ScanPageState.RETAKE_REQUIRED -> ScanPageState.RETAKE_REQUIRED
+        else -> state
+    }
+
+    private fun beginDraftMutation() {
+        draftMutationCount += 1
+        _uiState.update { it.copy(draftMutationInProgress = true) }
+        publishCandidates()
+    }
+
+    private fun endDraftMutation() {
+        draftMutationCount = (draftMutationCount - 1).coerceAtLeast(0)
+        _uiState.update {
+            it.copy(draftMutationInProgress = draftMutationCount > 0)
+        }
+        publishCandidates()
+    }
+
+    private fun reconcileTransientJobs() {
+        val referencedPageIds = draftPages.mapTo(mutableSetOf(), ScanPage::pageId)
+        val orphanedIds = _uiState.value.captureJobs
+            .map(CaptureJob::captureId)
+            .filter { pageId ->
+                pageId !in referencedPageIds &&
+                    pageId !in reservationInFlightPageIds &&
+                    pageId !in tombstonedPageIds
+            }
+        orphanedIds.forEach { pageId ->
+            tombstonedPageIds += pageId
+            viewModelScope.launch {
+                runCatching { normalizationJobs.remove(pageId)?.cancelAndJoin() }
+                runCatching { cleanupTombstonedPage(pageId) }
+                removeJob(pageId)
+            }
+        }
+    }
+
+    private suspend fun cleanupTombstonedPage(pageId: String) {
+        draftRepository.cleanupPageDirectory(pageId)
     }
 
     private fun createCaptureId(): String {
@@ -474,8 +785,6 @@ internal class CameraProbeViewModel(
     }
 
     private companion object {
-        const val ORIGINAL_FILE_NAME = "original.jpg"
-        const val NORMALIZED_FILE_NAME = "normalized_1280.jpg"
         val CAPTURE_ID_TIME_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")
     }
