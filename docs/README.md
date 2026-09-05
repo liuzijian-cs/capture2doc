@@ -1,6 +1,6 @@
 # Capture2Doc 文档
 
-Capture2Doc 当前处于设计与原型验证阶段。这里同时记录已经落地的 Android 本地能力、目标架构、模型选型过程和后续验证标准；各文档通过状态段落区分当前实现与未来能力。
+Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地的 Android 本地能力和服务端模块、目标架构、模型选型过程和后续验证标准；各文档通过状态段落区分当前实现与未来能力。
 
 ## 文档索引
 
@@ -12,8 +12,11 @@ Capture2Doc 当前处于设计与原型验证阶段。这里同时记录已经�
 - [Android 相机拍摄与图像处理](android_camera_capture.md)：CameraX 配置、4:3 取景、对焦、方向、低延迟和 1280 像素选型。
 - [Android 相机测试与验收](android_camera_testing.md)：自动化覆盖、通用真机清单、性能指标和 OCR 输入对照。
 - [C2D-XML 标签体系](c2d_xml.md)：v0.1 页面无关中间表示、标签约束，以及 Lark、Markdown、思源输出映射。
+- [C2D-XML 增量组装](c2d_xml_assembly.md)：尾块替换、768/1536 token 上下文策略、离线导出命令、接口及验证结果。
 - [模型选型记录](model-selection.md)：评估集、候选模型、公开结果、选择结论和自建评测计划。
 - [PaddleOCR-VL-1.6 输入 Token 与调优](model_paddle_ocr_v_1_6.md)：图像 token 计算、上下文预算、vLLM 参数和 WSL 问题记录。
+- [Qwen3.5-9B FP8 输入 Token 与独立 Worker](model_qwen_3_5_9b.md)：图像 token、chat template、16K/8K 预算、量化和显存验证方法。
+- [Qwen3.5-9B FP8 参数实测与推荐](model_qwen_3_5_9b_parameters.md)：16GB NVIDIA 实测结果、显存对比和当前推荐参数。
 
 ## 当前决策
 
@@ -21,13 +24,15 @@ Capture2Doc 当前处于设计与原型验证阶段。这里同时记录已经�
 - Android 当前阶段：CameraX、本地单草稿、页面整理、稳定 viewport、overlay 候选条和底部控件已经实现。最终修复后的 JVM 测试、Debug 构建、Lint 和设备测试 APK 构建通过；当前没有连接设备，新 UI 真机验收待执行。
 - 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页“完成”暂时只进入本地页面整理页，不代表上传或文档任务完成。
 - 后续处理方向：上传载荷就绪后以稳定 `pageId` 幂等提交，上传成功立即进入页面级 OCR，最终提交有序 `pageId` 数组后再启动文档级 VLM；当前尚未实现网络链路，具体上传载荷、鉴权、重试和跨进程上传恢复细节仍待冻结。
-- 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B 4-bit，Apple Silicon 默认 4B 4-bit。
-- 中间表示：C2D-XML v0.1 标签基线已经冻结，只保留最终文档的逻辑结构、内容、顺序和有限行内样式；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。下一步编写对应 XSD。
+- 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
+- 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、768/1536 token 上下文选择和离线文件导出已实现；采集页码、坐标和来源追溯属于内部中间数据，不进入 C2D-XML。真实模型续写与目标格式 Renderer 尚待接入。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 
 ## 状态约定
 
 文档使用以下词语区分成熟度：
+
+- **已实现**：已有代码及对应验证记录；不代表未接入的端到端链路也已完成。
 
 - **已决定**：当前设计基线，除非评测结果否定，否则按此推进。
 - **候选**：需要在真实样本上比较后才能确定。

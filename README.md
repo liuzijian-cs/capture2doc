@@ -10,7 +10,7 @@ C2D-XML 只描述最终文档的逻辑内容，不保存采集页码、页面坐
 
 - Android App 负责拍照、视频帧筛选、页面检测、矫正、去重和顺序确认。
 - 使用 PaddleOCR-VL-1.6 完成页面级文字、表格、公式和阅读顺序解析。
-- 使用量化后的 Qwen3.5 完成多页关联、无关内容过滤和 C2D-XML v0.1 结构映射：16GB NVIDIA GPU 使用 9B 档位，16GB Apple Silicon 使用 4B 档位。
+- 使用量化后的 Qwen3.5 完成多页关联、无关内容过滤和 C2D-XML v0.1 结构映射：16GB NVIDIA GPU 使用 9B FP8，16GB Apple Silicon 使用 4B 4-bit。
 - 所有模型推理仅在用户自己的服务端设备上执行；Lark 发布如启用，则作为独立、显式授权的输出步骤，Markdown 和思源 `.sy` 由本地 Renderer 生成。
 
 ## C2D-XML
@@ -35,6 +35,7 @@ C2D-XML 不包含原始分页、坐标、来源追溯、图片、画板、分栏
 - [Android 相机测试与验收](docs/android_camera_testing.md)
 - [C2D-XML 标签体系](docs/c2d_xml.md)
 - [模型选型记录](docs/model-selection.md)
+- [Qwen3.5-9B FP8 输入 Token 与独立 Worker](docs/model_qwen_3_5_9b.md)
 
 ## License
 

@@ -82,17 +82,17 @@ Unlimited-OCR 没有通用 chat template，依赖指定 prompt、特殊 token �
 
 ## 选型结论
 
-### 主方案：PaddleOCR-VL-1.6 + Qwen3.5-9B 4-bit
+### 主方案：PaddleOCR-VL-1.6 + Qwen3.5-9B FP8
 
 PaddleOCR-VL-1.6 在页面文字、表格和公式上提供较强且成熟的 pipeline；Qwen3.5-9B 在 ExtractBench、长上下文和通用指令遵循方面更适合把多页结果映射到固定的 C2D-XML 文档树。两者职责分离，也便于针对 OCR 或 XML 层分别替换和评测。
 
 该组合是 NVIDIA 16GB 档位的主方案。Apple Silicon 16GB 使用相同页面解析器和接口，但默认把编排器调整为 Qwen3.5-4B 4-bit，以给系统、视觉编码器和中间结果保留统一内存空间。9B 在 Apple 16GB 上只作为实测候选。
 
-### 实拍备选：MonkeyOCRv2-B-Parsing + Qwen3.5-9B 4-bit
+### 实拍备选：MonkeyOCRv2-B-Parsing + Qwen3.5-9B FP8
 
 MonkeyOCRv2-B-Parsing 在 MDPBench 的 Overall 和 Photo 分项领先当前本地候选，应进入真实低质量拍照和多语言样本的 A/B 测试。中文文档仍需与 PaddleOCR-VL-1.6 单独比较，不能从总分推断胜负。
 
-### 长文档实验组：Unlimited-OCR + Qwen3.5-9B 4-bit
+### 长文档实验组：Unlimited-OCR + Qwen3.5-9B FP8
 
 它验证一次输入多页、连续生成和固定 KV Cache 的工程价值，适用重点是干净扫描件和数字 PDF。若预处理后的手机照片、小字或格式恢复未达到门槛，则不进入默认路径。
 
@@ -104,10 +104,10 @@ Qwen3.8-27B 的公开 Schema 提取成绩更高，也支持视觉输入。它可
 
 ### 对照系统
 
-1. Qwen3.5-9B 4-bit 单模型；
-2. PaddleOCR-VL-1.6 + Qwen3.5-9B 4-bit；
-3. MonkeyOCRv2-B-Parsing + Qwen3.5-9B 4-bit；
-4. Unlimited-OCR + Qwen3.5-9B 4-bit；
+1. Qwen3.5-9B FP8 单模型；
+2. PaddleOCR-VL-1.6 + Qwen3.5-9B FP8；
+3. MonkeyOCRv2-B-Parsing + Qwen3.5-9B FP8；
+4. Unlimited-OCR + Qwen3.5-9B FP8；
 5. Apple Silicon：PaddleOCR-VL-1.6 + Qwen3.5-4B 4-bit。
 
 Qwen3-VL-8B 仅在主候选出现速度、兼容性或质量问题时加入第二轮；Qwen3.5-4B 在 Apple Silicon 16GB 档位首轮评测，在 NVIDIA 档位只作为资源受限对照。
@@ -148,7 +148,7 @@ XML 评分以规范化的 XPath-value 对为基础，同时记录 XML Parse Rate
 
 ## 待验证事项
 
-- 4-bit 量化对 Qwen3.5-9B OCR 复核和 C2D-XML 映射准确率的影响；
+- FP8 在线量化对 Qwen3.5-9B OCR 复核和 C2D-XML 映射准确率的影响；
 - PaddleOCR-VL-1.6 与 MonkeyOCRv2-B 在中文手机照片子集上的差异；
 - Unlimited-OCR 多页 Base 模式在预处理后手机照片上的小字表现；
 - 页面缩略图与疑难裁剪的视觉 token 预算；

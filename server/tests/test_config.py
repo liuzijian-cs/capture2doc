@@ -11,6 +11,14 @@ from capture2doc.config import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_PIXELS,
     PaddleOcrVlSettings,
+    QWEN35_EXPECTED_TEXT_TOKENS,
+    QWEN35_KV_CACHE_MEMORY_BYTES,
+    QWEN35_MAX_IMAGE_TOKENS,
+    QWEN35_MAX_MODEL_LEN,
+    QWEN35_MAX_OUTPUT_TOKENS,
+    QWEN35_MAX_PIXELS,
+    QWEN35_TEMPLATE_TOKEN_MARGIN,
+    Qwen35Settings,
 )
 
 
@@ -56,3 +64,24 @@ def test_settings_allow_gpu_utilization_instead_of_fixed_cache(tmp_path: Path) -
 
     assert settings.kv_cache_memory_bytes is None
     assert settings.gpu_memory_utilization == 0.2
+
+
+def test_qwen35_defaults_reserve_eight_thousand_output_tokens(tmp_path: Path) -> None:
+    settings = Qwen35Settings(cache_dir=tmp_path)
+
+    assert settings.max_pixels == QWEN35_MAX_PIXELS == 1_310_720
+    assert QWEN35_MAX_PIXELS // 32**2 == QWEN35_MAX_IMAGE_TOKENS == 1_280
+    assert settings.max_output_tokens == QWEN35_MAX_OUTPUT_TOKENS == 8_192
+    assert settings.max_model_len == QWEN35_MAX_MODEL_LEN == 16_384
+    assert settings.kv_cache_memory_bytes == QWEN35_KV_CACHE_MEMORY_BYTES == 1024**3
+    assert settings.quantization == "fp8_per_channel"
+    assert settings.enable_thinking_by_default is False
+
+    planned_tokens = (
+        QWEN35_MAX_IMAGE_TOKENS
+        + QWEN35_EXPECTED_TEXT_TOKENS
+        + QWEN35_TEMPLATE_TOKEN_MARGIN
+        + QWEN35_MAX_OUTPUT_TOKENS
+    )
+    assert planned_tokens == 14_080
+    assert planned_tokens < settings.max_model_len

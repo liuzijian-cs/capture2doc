@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from capture2doc.config import PaddleOcrVlSettings
+from capture2doc.config import VllmWorkerSettings
 from capture2doc.inference.device import is_wsl2
 
 
@@ -25,7 +25,7 @@ class RuntimeStartError(RuntimeError):
 class VllmRuntime:
     def __init__(
         self,
-        settings: PaddleOcrVlSettings,
+        settings: VllmWorkerSettings,
         model_path: str | Path,
         log_path: str | Path,
         *,
@@ -57,18 +57,39 @@ class VllmRuntime:
             str(self.settings.max_num_batched_tokens),
             "--max-num-seqs",
             str(self.settings.max_num_seqs),
-            "--no-enable-prefix-caching",
+            (
+                "--enable-prefix-caching"
+                if self.settings.enable_prefix_caching
+                else "--no-enable-prefix-caching"
+            ),
             "--mm-processor-cache-gb",
-            "0",
+            str(self.settings.mm_processor_cache_gb),
             "--mm-processor-kwargs",
             json.dumps(
-                {"max_pixels": self.settings.max_pixels},
+                self.settings.mm_processor_kwargs,
                 separators=(",", ":"),
             ),
             "--limit-mm-per-prompt",
-            json.dumps({"image": 1}, separators=(",", ":")),
-            "--trust-remote-code",
+            json.dumps(self.settings.limit_mm_per_prompt, separators=(",", ":")),
         ]
+        if self.settings.enable_chunked_prefill:
+            command.append("--enable-chunked-prefill")
+        if self.settings.quantization is not None:
+            command.extend(["--quantization", self.settings.quantization])
+        if self.settings.reasoning_parser is not None:
+            command.extend(["--reasoning-parser", self.settings.reasoning_parser])
+        if self.settings.default_chat_template_kwargs is not None:
+            command.extend(
+                [
+                    "--default-chat-template-kwargs",
+                    json.dumps(
+                        self.settings.default_chat_template_kwargs,
+                        separators=(",", ":"),
+                    ),
+                ]
+            )
+        if self.settings.trust_remote_code:
+            command.append("--trust-remote-code")
         if self.settings.kv_cache_memory_bytes is not None:
             command.extend(
                 ["--kv-cache-memory-bytes", str(self.settings.kv_cache_memory_bytes)]
