@@ -15,23 +15,28 @@ from .repository import Repository
 
 
 def visible_blocks(state):
-    committed = list(state.get('blocks', []))
+    visible = [b for b in state.get('blocks', []) if b.get('xml')]
+    # Committed corruption is fatal. A draft subset may instead be temporarily
+    # incompatible with the retained old tail and must wait for related repairs.
+    document_xml(visible, state.get('lang'))
     draft = state.get('draft')
-    current = []
     if draft:
         for block in draft['blocks']:
-            if block['status'] not in ('ok','fallback') or block['final_validation'] != 'passed' or not block['xml']:
+            if block['status'] not in ('ok', 'fallback') or block['final_validation'] != 'passed' or not block['xml']:
                 continue
             block = deepcopy(block)
+            proposed = list(visible)
             if block.get('replaces_tail'):
                 block['id'] = draft['old_tail']['id']
-                if committed and committed[-1]['id'] == block['id']:
-                    committed.pop()
-            current.append(block)
-    values = [b for b in committed + current if b.get('xml')]
-    # This check also protects against exposing a temporarily invalid combination.
-    document_xml(values, state.get('lang'))
-    return [{'blockId':b['id'],'xml':b['xml']} for b in values]
+                if proposed and proposed[-1]['id'] == block['id']:
+                    proposed.pop()
+            proposed.append(block)
+            try:
+                document_xml(proposed, state.get('lang'))
+            except ValueError:
+                continue
+            visible = proposed
+    return [{'blockId': b['id'], 'xml': b['xml']} for b in visible]
 
 
 class ServiceBlockStore(BlockStore):

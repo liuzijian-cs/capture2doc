@@ -326,3 +326,24 @@ def test_event_sql_transaction_rolls_back_projection_and_replays(service):
     repo._event=original
     repo.consume(doc,'outbox-id',payload);repo.consume(doc,'outbox-id',payload)
     assert len(repo.events(doc,0))==1
+
+
+def test_unexpected_api_failure_is_safe_json(service,monkeypatch):
+    _,repo,client,_=service
+    doc=create(client)
+    def fail(identity):raise RuntimeError('private storage details')
+    monkeypatch.setattr(repo,'public',fail)
+    public=TestClient(client.app,raise_server_exceptions=False)
+    result=public.get(f'/v1/documents/{doc}',headers={'Authorization':client.headers['Authorization']})
+    assert result.status_code==500 and set(result.json())=={'message'}
+    assert 'private storage' not in result.text
+
+
+def test_incompatible_draft_subset_waits_without_failing_document():
+    from capture2doc.pipeline.blocks import candidate
+    from capture2doc.pipeline.draft import initialize,new_draft
+    old=candidate(block('原标题','<title>原标题</title>'),'a')
+    draft=new_draft('b',old)
+    initialize(draft,submit(block('替代标题','<title>替代标题</title>'),tail=block('原标题','<bad/>')))
+    values=visible_blocks({'blocks':[old],'draft':draft,'lang':'zh-CN'})
+    assert len(values)==1 and '原标题' in values[0]['xml']

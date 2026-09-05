@@ -98,14 +98,16 @@ def test_worker_resume_preserves_repair_budget_and_gpu_lock(network):
 def test_probe_final_verification_and_lost_snapshot(network,tmp_path):
     settings,repo,client,_,_=network
     doc=create(client);assert upload(client,doc).status_code==201;finalize(client,doc,['a'])
-    Worker(settings,Models({'a':'完整正文'})).run_available(wait_idle=False)
+    table='<table><thead><tr><th>列名</th></tr></thead><tbody><tr><td>正文</td></tr></tbody></table>'
+    models=Models({'a':'完整正文'},actions=[submit(block('完整正文'),block('列名正文',table))])
+    Worker(settings,models).run_available(wait_idle=False)
     import importlib.util
     from pathlib import Path
     spec=importlib.util.spec_from_file_location('probe',Path(__file__).parents[1]/'scripts/test_service_client.py')
     probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
     token=client.headers['Authorization'].removeprefix('Bearer ')
     result=probe.collect(str(client.base_url),token,doc,tmp_path/'output')
-    assert result['previewMatchesFinal'] and result['blockCount']==1
+    assert result['previewMatchesFinal'] and result['blockCount']==2
     # Losing a snapshot requires a new consistent snapshot, not cursor-only replay.
     (tmp_path/'output/preview.json').unlink()
     assert probe.collect(str(client.base_url),token,doc,tmp_path/'output')['sha256']==result['sha256']

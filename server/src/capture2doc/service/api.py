@@ -98,6 +98,10 @@ def create_app(settings: Settings | None = None):
         headers = {'WWW-Authenticate':'Bearer'} if exc.status == 401 else None
         return JSONResponse({'message':exc.message}, status_code=exc.status, headers=headers)
 
+    @app.exception_handler(Exception)
+    async def execution_error(request, exc):
+        return JSONResponse({'message':'服务端暂时无法处理请求，请重试或联系服务管理员。'}, status_code=500)
+
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
         return JSONResponse({'message':'请求字段缺失或格式不正确'}, status_code=422)
@@ -207,7 +211,7 @@ def create_app(settings: Settings | None = None):
     def get_document(document_id: str, _=Depends(authenticated)):
         return repo.public(document_id)
 
-    @app.get('/v1/documents/{document_id}/events', responses={200:{'content':{'text/event-stream':{}}}})
+    @app.get('/v1/documents/{document_id}/events', response_class=Response, responses={200:{'content':{'text/event-stream':{}}}})
     async def events(document_id: str, request: Request, last_event_id: str | None = Header(default=None),
                      device=Depends(authenticated)):
         cursor, snapshot = await anyio.to_thread.run_sync(repo.snapshot,document_id)

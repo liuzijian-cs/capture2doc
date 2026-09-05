@@ -39,18 +39,23 @@ def collect(base_url, token, document_id, destination, *, reconnect_once=True, t
     destination.mkdir(parents=True, exist_ok=True)
     state_path = destination / 'preview.json'
     state = json.loads(state_path.read_text()) if state_path.exists() else {
-        'documentId': document_id, 'blocks': [], 'revision': 0, 'cursor': None,
+        'documentId': document_id, 'startedAt': time.time(), 'blocks': [], 'revision': 0, 'cursor': None,
         'firstBlockAt': None, 'events': [], 'reconnections': 0}
     if state['documentId'] != document_id:
         raise ValueError('Saved preview belongs to another document')
     started = time.monotonic()
-    started_wall = time.time()
+    started_wall = state.get('startedAt', state['events'][0]['receivedAt'] if state['events'] else time.time())
     reconnect_done = state['reconnections'] > 0
     with httpx.Client(base_url=base_url, headers={'Authorization': 'Bearer ' + token}, timeout=45) as client:
         terminal = False
+        connection_attempts = 0
         while not terminal:
             if time.monotonic() - started > timeout:
                 raise TimeoutError('Document deadline exceeded')
+            if connection_attempts:
+                state['reconnections'] += 1
+                write_json(state_path, state)
+            connection_attempts += 1
             headers = {} if state['cursor'] is None else {'Last-Event-ID': str(state['cursor'])}
             try:
                 connected_at = time.time()
@@ -62,6 +67,9 @@ def collect(base_url, token, document_id, destination, *, reconnect_once=True, t
                     if stream.status_code == 204:
                         terminal = True
                         break
+                    if stream.status_code in (408, 429) or stream.status_code >= 500:
+                        time.sleep(1)
+                        continue
                     stream.raise_for_status()
                     for kind, cursor, data in read_events(stream):
                         received = time.time()
@@ -86,13 +94,11 @@ def collect(base_url, token, document_id, destination, *, reconnect_once=True, t
                             break
                         if reconnect_once and not reconnect_done and kind == 'blocks.patch':
                             reconnect_done = True
-                            state['reconnections'] += 1
                             write_json(state_path, state)
                             break
                 if not terminal:
                     time.sleep(.2)
             except (httpx.TransportError, ValueError) as exc:
-                state['reconnections'] += 1
                 # A revision mismatch must obtain a fresh consistent snapshot.
                 if not isinstance(exc, httpx.TransportError):
                     state.update(cursor=None, blocks=[], revision=0)
@@ -111,15 +117,18 @@ def collect(base_url, token, document_id, destination, *, reconnect_once=True, t
             (destination / 'document.xml').write_bytes(raw)
             root = etree.fromstring(raw)
             nodes = list(root)
-            final_nodes = [etree.tostring(n, method='c14n') for n in nodes]
+            # Detach both sides before canonicalizing; inherited namespace context
+            # can otherwise produce spurious xmlns resets in libxml2 subtrees.
+            final_nodes = [etree.tostring(etree.fromstring(etree.tostring(n)), method='c14n') for n in nodes]
             preview_nodes = [etree.tostring(etree.fromstring(b['xml'].encode()), method='c14n') for b in state['blocks']]
             assert final_nodes == preview_nodes, 'SSE preview differs from final XML'
         else:
             assert not state['blocks'] and result['sha256'] is None
         # Replay backlog latency is recorded separately from live delivery latency.
         delays = [e['deliveryMs'] for e in state['events'] if e['deliveryMs'] is not None and not e['replayed']]
+        finished_at = next((e['receivedAt'] for e in reversed(state['events']) if e['kind'] in ('document.completed', 'document.failed')), time.time())
         summary = {'documentId': document_id, 'status': result['status'], 'blockCount': len(state['blocks']),
-            'sha256': result['sha256'], 'elapsedSeconds': time.monotonic() - started,
+            'sha256': result['sha256'], 'elapsedSeconds': finished_at - started_wall,
             'firstBlockSeconds': state['firstBlockAt'] - started_wall if state['firstBlockAt'] else None,
             'maxLiveDeliveryMs': max(delays, default=None), 'reconnections': state['reconnections'],
             'previewMatchesFinal': True}
