@@ -284,3 +284,45 @@ def test_config_errors(tmp_path,monkeypatch):
     with pytest.raises(ValueError):Settings(max_upload_bytes=-1)
     path.write_text('[service]\nunknown="bad"\n')
     with pytest.raises(ValueError):Settings.load(path)
+
+
+def test_tail_preview_id_survives_formal_commit(service):
+    settings,repo,client,_=service
+    doc=create(client)
+    for identity in ('a','b'):assert upload(client,doc,identity).status_code==201
+    finalize(client,doc,['a','b'])
+    models=Models({'a':'旧尾','b':'新增'},actions=[submit(block('旧尾')),submit(tail=block('旧尾新增'))])
+    drive(settings,repo,models)
+    changes=[e[2] for e in repo.events(doc,0,1000) if e[1]=='blocks.patch']
+    assert len(changes)==2
+    first=changes[0]['blocks'][0];last=changes[1]['blocks'][0]
+    assert first['blockId']==last['blockId'] and (first['version'],last['version'])==(1,2)
+    assert len(replay(repo,doc))==1
+
+
+def test_snapshot_highwater_has_no_event_gap(service):
+    _,repo,client,_=service
+    doc=create(client)
+    repo.consume(doc,'first',{'blocks':[{'blockId':'a','xml':paragraph('甲')}]})
+    cursor,snapshot=repo.snapshot(doc)
+    repo.consume(doc,'second',{'blocks':[{'blockId':'a','xml':paragraph('甲')},{'blockId':'b','xml':paragraph('乙')}]})
+    values,revision=snapshot['blocks'],snapshot['revision']
+    for _,kind,data in repo.events(doc,cursor):
+        if kind=='blocks.patch':values,revision=apply_preview_patch(values,revision,data)
+    assert values==repo.snapshot(doc)[1]['blocks'] and len(values)==2
+
+
+def test_event_sql_transaction_rolls_back_projection_and_replays(service):
+    _,repo,client,_=service
+    doc=create(client)
+    payload={'blocks':[{'blockId':'a','xml':paragraph('甲')}]}
+    original=repo._event
+    def fail(db,*args):
+        original(db,*args)
+        raise OSError('simulated interruption before SQLite commit')
+    repo._event=fail
+    with pytest.raises(OSError):repo.consume(doc,'outbox-id',payload)
+    assert repo.snapshot(doc)[0]==0 and not repo.snapshot(doc)[1]['blocks']
+    repo._event=original
+    repo.consume(doc,'outbox-id',payload);repo.consume(doc,'outbox-id',payload)
+    assert len(repo.events(doc,0))==1

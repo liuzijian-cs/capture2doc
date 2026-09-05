@@ -93,3 +93,69 @@ def test_worker_resume_preserves_repair_budget_and_gpu_lock(network):
     assert not any(e.startswith('ocr:') for e in resumed.events)
     assert len(resumed.requests)<5
     replay(repo,doc)
+
+
+def test_probe_final_verification_and_lost_snapshot(network,tmp_path):
+    settings,repo,client,_,_=network
+    doc=create(client);assert upload(client,doc).status_code==201;finalize(client,doc,['a'])
+    Worker(settings,Models({'a':'完整正文'})).run_available(wait_idle=False)
+    import importlib.util
+    from pathlib import Path
+    spec=importlib.util.spec_from_file_location('probe',Path(__file__).parents[1]/'scripts/test_service_client.py')
+    probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
+    token=client.headers['Authorization'].removeprefix('Bearer ')
+    result=probe.collect(str(client.base_url),token,doc,tmp_path/'output')
+    assert result['previewMatchesFinal'] and result['blockCount']==1
+    # Losing a snapshot requires a new consistent snapshot, not cursor-only replay.
+    (tmp_path/'output/preview.json').unlink()
+    assert probe.collect(str(client.base_url),token,doc,tmp_path/'output')['sha256']==result['sha256']
+
+
+def test_aborted_upload_releases_reservation(network):
+    _,repo,client,_,_=network
+    doc=create(client)
+    host,port=client.base_url.host,client.base_url.port
+    raw=socket.create_connection((host,port))
+    request=(f'PUT /v1/documents/{doc}/pages/cut HTTP/1.1\r\nHost: {host}\r\n'
+             f'Authorization: {client.headers["Authorization"]}\r\nContent-Type: image/jpeg\r\n'
+             f'X-Content-SHA256: {"0"*64}\r\nContent-Length: 10000\r\n\r\n').encode()
+    raw.sendall(request+b'partial')
+    deadline=time.monotonic()+3
+    while True:
+        with repo.connection() as db:count=db.execute('SELECT COUNT(*) FROM uploads').fetchone()[0]
+        if count:break
+        assert time.monotonic()<deadline;time.sleep(.01)
+    raw.close()
+    deadline=time.monotonic()+3
+    while True:
+        with repo.connection() as db:count=db.execute('SELECT COUNT(*) FROM uploads').fetchone()[0]
+        if not count:break
+        assert time.monotonic()<deadline;time.sleep(.01)
+    assert not list((repo.root/'tmp').glob('*.upload'))
+    assert not repo.images(doc)
+
+
+def test_slow_sender_timeout_does_not_hold_worker():
+    import anyio
+    from sse_starlette import EventSourceResponse, ServerSentEvent
+    from sse_starlette.sse import SendTimeoutError
+    async def scenario():
+        released=anyio.Event()
+        async def body():
+            try:
+                yield ServerSentEvent(data='complete block')
+            finally:
+                released.set()
+        response=EventSourceResponse(body(),send_timeout=.03,ping=15)
+        async def send(message):
+            if message['type']=='http.response.body':await anyio.sleep(10)
+        async def receive():
+            await anyio.sleep(10)
+            return {'type':'http.disconnect'}
+        started=time.monotonic()
+        try:
+            await response({'type':'http','asgi':{'version':'3.0'},'method':'GET','path':'/events','headers':[]},receive,send)
+        except SendTimeoutError:
+            pass
+        assert released.is_set() and time.monotonic()-started<1
+    anyio.run(scenario)

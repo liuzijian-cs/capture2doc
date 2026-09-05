@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sse_starlette import EventSourceResponse, ServerSentEvent
+from starlette.requests import ClientDisconnect
 
 from capture2doc.pipeline.store import exclusive_lock, valid_id
 from .repository import Repository, ServiceError
@@ -185,6 +186,8 @@ def create_app(settings: Settings | None = None):
             elif received != old['bytes']:
                 raise ServiceError(409,'重复图片长度不匹配')
             return JSONResponse({'pageId':image_id,'sha256':sha},status_code=200 if old else 201)
+        except ClientDisconnect:
+            return Response(status_code=499)
         except TimeoutError:
             raise ServiceError(408,'图片上传超时，请重试') from None
         finally:

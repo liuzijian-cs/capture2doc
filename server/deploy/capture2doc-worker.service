@@ -11,6 +11,7 @@ ExecStart=/home/zane/workspace/project/capture2doc/server/.venv/bin/capture2doc 
 Restart=on-failure
 RestartSec=10
 UMask=0077
+Environment="PATH=/home/zane/workspace/project/capture2doc/server/.venv/bin:/home/zane/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib"
 NoNewPrivileges=true
 PrivateTmp=false
 KillMode=mixed
