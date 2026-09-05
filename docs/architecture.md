@@ -3,7 +3,7 @@
 > 状态：设计与原型验证阶段  
 > 流程核对日期：2026-09-05；实现基线：`e55c8f8`
 
-本文描述目标架构，不表示所有组件均已实现。跨端触发条件、编辑与失败案例统一见 [扫描 Pipeline](capture_pipeline.md)；Android 实现和设计演变见 [开发成果与计划](android_progress_and_plan.md)。本轮新增 [服务端本地 CLI](server_pipeline.md)，连接模型调用、XML 组装与检查点恢复，真实 GPU 联调待执行。Android 上传和 HTTP 业务链路尚未接通。
+本文描述目标架构，不表示所有组件均已实现。跨端触发条件、编辑与失败案例统一见 [扫描 Pipeline](capture_pipeline.md)；Android 实现和设计演变见 [开发成果与计划](android_progress_and_plan.md)。本轮新增 [服务端本地 CLI](server_pipeline.md)，连接模型调用、XML 组装与检查点恢复，单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，多图和质量验收仍待扩展。Android 上传和 HTTP 业务链路尚未接通。
 
 ## 目标
 
@@ -90,7 +90,7 @@ flowchart LR
 每轮响应使用内部 c2d-update 信封，独立校验完整子树；最终 document 再做整文档校验。
 当前已实现校验、尾块替换、768/1536 token 上下文选择及离线文件导出。
 上下文实际返回数量由尾块长度和调用方提供的剩余预算决定，详见
-[C2D-XML 增量组装](c2d_xml_assembly.md)。本地 CLI 已接入模型窗口调度代码，真实 GPU 验收待执行，端到端 Android 采集上传尚未接通。
+[C2D-XML 增量组装](c2d_xml_assembly.md)。本地 CLI 已接入模型窗口调度代码，单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，多图和质量验收仍待扩展，端到端 Android 采集上传尚未接通。
 
 会话级 `finalize` 是未来业务协议；已有 `C2DAssembler.finalize()` 仅校验并序列化 XML，不冻结内存状态、不启动模型或写文件。页面上传的幂等语义也不适用于非幂等的 XML 更新应用。
 
@@ -160,7 +160,7 @@ OPEN → RECEIVING → FINALIZED → WAITING_FOR_PAGES → ASSEMBLING → VALIDA
 
 ### 目标服务端组件与现状
 
-以下是职责划分。当前具有独立 Worker、XML 校验/组装，以及串行连接两模型并支持恢复的本地 CLI；HTTP、实时业务队列、完整 Paddle 页面 pipeline 及 Renderer 尚未接入。CLI 的真实 GPU 协同验收待执行。
+以下是职责划分。当前具有独立 Worker、XML 校验/组装，以及串行连接两模型并支持恢复的本地 CLI；HTTP、实时业务队列、完整 Paddle 页面 pipeline 及 Renderer 尚未接入。CLI 的单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，多图和质量验收仍待扩展。
 
 1. **Session API**：验证请求、鉴权、幂等、页序和会话状态。
 2. **Local Asset Store**：保存原始页面、处理后页面、模型中间结果和导出物。

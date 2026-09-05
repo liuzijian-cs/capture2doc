@@ -31,7 +31,7 @@ Capture2Doc 当前处于设计与原型验证阶段。这里记录已经落地�
 - 页面交互：候选点按查看大图、双击立即删除、长按调整顺序；拍照页“完成”暂时只进入本地页面整理页，不代表上传或文档任务完成。
 - 后续处理方向：相机页直接管理候选，不强制经过独立整理页；载荷就绪后逐页幂等上传，接收成功即排 OCR，最终输入冻结且所需结果齐备后才按确认页序组装。网络链路未实现，版本、载荷、鉴权、重试、保存/放弃和恢复详见 Pipeline 待决策表。
 - 16GB 档位：PaddleOCR-VL-1.6 页面解析 + Qwen3.5 多页编排；NVIDIA 默认 9B FP8，Apple Silicon 默认 4B 4-bit。
-- 服务端首轮：本地 CLI 已连接 Paddle OCR、Qwen 和 XML 组装，代码支持恢复与有限纠错，真实 GPU 联调待执行。文档使用 document_id，不可变图片只使用 image_id，最终 ordered_image_ids 决定处理顺序；Android 的本地 pageId 不直接作为图片身份。
+- 服务端首轮：本地 CLI 已连接 Paddle OCR、Qwen 和 XML 组装，代码支持恢复与有限纠错，单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，内容与样式质量仍需优化。文档使用 document_id，不可变图片只使用 image_id，最终 ordered_image_ids 决定处理顺序；Android 的本地 pageId 不直接作为图片身份。
 - 中间表示：C2D-XML v0.1 标签基线已经冻结，XSD、安全校验、尾块合并、常规 768/1536 token 上下文选择和离线文件导出已实现。CLI 可按真实模型预算完整保留超过 1536 的尾块；采集、来源、运行信息不进入 C2D-XML。目标格式 Renderer 尚待接入。
 - 输出目标：优先生成 Lark 文档，Markdown 作为通用回退格式，思源 `.sy` 由专用 Renderer 生成；当前不考虑 DOC/DOCX。
 

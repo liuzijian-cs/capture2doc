@@ -1,6 +1,6 @@
 # 手机图片到 C2D-XML：本地 CLI
 
-> 状态：首轮 CLI 与故障恢复代码已实现；真实 NVIDIA 双模型联调待执行。
+> 状态：首轮 CLI 已实现；单张真实文档照片的 NVIDIA 双模型闭环、完成后恢复及 SIGTERM 中断续跑已验证，内容与样式质量仍需优化。
 >
 > 日期：2026-09-05。当前范围是普通手机文档照片，不承诺复杂版面质量。
 
@@ -128,6 +128,29 @@ output-dir/
 
 本地自动化使用可控模型边界，实际执行身份冻结、模型阶段编排、真实 XML 校验、原子落盘和日志恢复。覆盖乱序清单、删除图片、截断、有限纠错、中断、重复提交保护、配置漂移、超长尾块、内容诊断和锁互斥。
 
-这些测试不加载 GPU 模型。首次真实验收仍需在 NVIDIA 主机使用普通手机照片执行 CLI，核对 OCR、完整提示词 token、生成内容、文件合法性、顺序启停与重复运行后的资源回收；不得继承旧 smoke/压力测试的通过结论。
+这些自动化测试不加载 GPU 模型。真实模型验收独立记录如下，不继承旧 smoke/压力测试的通过结论；多张真实照片跨轮续接、模型实际触发的纠错和截断处理仍需扩充样本验证。
 
 本轮实际本地检查：服务端全量 **187 项测试通过**，相关 Python 文件 Ruff 检查通过；真实 CLI 子进程已验证无 CUDA 情况下恢复完成文档及 needs_review 退出码。另用 Pillow 构造 EXIF 旋转 JPEG，验证原图不变、两模型共用 RGB 像素、旋正尺寸及派生 PNG 可重复；已构建 wheel 并确认完整 TXT 提示词和 XSD 随包分发。这些结果不包含真实 OCR/Qwen 推理。
+
+## 2026-09-05 WSL 真实模型验证
+
+通过 `ssh wsl` 在 `~/workspace/project/capture2doc` 拉取 `main` 提交 `d881227`，在 `server/` 执行 `uv sync --locked --extra cuda`。环境为 RTX 4070 Ti SUPER（16376 MiB）、PyTorch 2.13.0+cu130、Transformers 5.16.1、vLLM 0.28.0、Pillow 12.3.0。远端服务端全量 **187 项测试通过**。
+
+使用远端已有的 `tests/test_image_1_larkdoc.jpg`（4000×3000，手机拍摄屏幕上的文档），以 `--host 10.255.255.254` 执行单图清单。照片及运行产物不提交 Git。首轮结果如下，耗时和显存均为这一次运行的观测值，不是基准均值或服务承诺。
+
+| 阶段 | 加载 | 请求 | 卸载 | prompt / output tokens | GPU 全局峰值 | 卸载后显存 |
+|---|---:|---:|---:|---:|---:|---:|
+| Paddle | 34.04 s | 2.78 s | 0.64 s | 1243 / 517 | 3846 MiB | 1054 MiB |
+| Qwen | 63.04 s | 10.87 s | 0.56 s | 3711 / 550 | 15890 MiB | 892 MiB |
+
+Paddle 正常 `stop` 后才卸载；进程组与显存检查通过后启动 Qwen。Qwen 输入含完整 TXT system、OCR、图片和动态 JSON，真实预检与服务返回均为 3711 prompt tokens，其中图片 1230 tokens；保留 8192 最大输出，实际正常 `stop`，reasoning tokens 为 0。第一轮即提交全部 851 个 OCR 字符，最终 XML 通过 XSD 与业务校验，CLI 退出 0。两模型清理均记录 `cleanup_verified=true`。Qwen 日志仍有 vLLM 的 semaphore 清理警告，但本次所属进程组已退出、显存已回落。
+
+再次运行相同目录的 `--resume`，约 0.10 s 完成，退出 0；XML SHA-256、已提交轮次及模型运行次数均未变化，没有重新加载模型。
+
+另建独立文档，在首个 Qwen 请求开始后约 1 s 向 CLI 注入 SIGTERM。CLI 退出 130，保存 `interrupted` 状态，已成功 OCR 保留，提交轮次为 0；所属 Qwen 进程组退出，显存回到 892 MiB。随后 `--resume` 退出 0 并生成合法 XML：总计 1 次 OCR、2 次 Qwen 尝试、1 次提交；恢复阶段只加载 Qwen，不重新加载 Paddle，OCR 记录保持一致。两次运行的全部模型阶段均通过清理门禁，最终显存仍为 892 MiB。故障注入及恢复合计约 148.80 s。这验证的是 SIGTERM 清理与未提交轮次续跑，不涵盖断电或 SIGKILL 的操作系统级回收。
+
+字符对齐覆盖率为 0.997555、输出支持率为 1.0，状态 `complete`；这只说明与 OCR 的文本一致性。人工对照照片发现：标题、列表和正文段落形成了结构，但工具栏和头像被 OCR 误识别出的符号仍在 XML 中，粗体、高亮及链接语义未恢复。当前不把该样本视为排版质量达标，仍保留 `semantic_fidelity_verified=false`。
+
+远端证据目录（相对于 `server/`）：`.cache/documents/wsl-pipeline-20260905/result/`，包含最终 `document.c2d.xml`、`state.json`、两模型原始响应、逐轮 token 预检及加载/卸载指标。
+
+中断恢复证据位于 `.cache/documents/wsl-recovery-20260905/`：`interrupted.log`、`resumed.log`、`verification.json` 和 `result/` 中的两次运行检查点。验证摘要明确记录退出码、OCR 复用、尝试/提交数量、XML 校验及各阶段显存。

@@ -3,7 +3,7 @@
 Capture2Doc 的本地推理服务。当前提供 NVIDIA/WSL 上可独立验证的
 PaddleOCR-VL-1.6 BF16 Worker 和 Qwen3.5-9B FP8 Worker。ModelScope 负责准备模型，
 vLLM 只加载本地快照。新增本地 CLI 将 Paddle OCR、Qwen 与 C2D-XML 组装串行连接，
-支持不可变图片、有序文档输入、有限纠错和检查点恢复；真实 GPU 联调仍待执行。
+支持不可变图片、有序文档输入、有限纠错和检查点恢复；单张真实照片的 GPU 闭环、完成后恢复及 SIGTERM 中断续跑已验证，内容与样式质量仍需优化。
 暂不包含完整 PaddleOCR 页面 pipeline、HTTP 业务 API、Android 上传或 Agent。
 
 ## 文档转换 CLI
