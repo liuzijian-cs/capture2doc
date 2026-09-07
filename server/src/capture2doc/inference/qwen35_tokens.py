@@ -80,8 +80,8 @@ def load_qwen35_processor(model_path: str | Path) -> Any:
         from transformers import AutoProcessor
     except ImportError as exc:
         raise RuntimeError(
-            "Transformers is not installed. On NVIDIA/WSL run "
-            "`uv sync --extra cuda`."
+            "Transformers is not installed. Run `uv sync --extra cuda` on NVIDIA/WSL "
+            "or `uv sync --extra apple` on Apple Silicon."
         ) from exc
     return AutoProcessor.from_pretrained(
         str(resolved_model_path),

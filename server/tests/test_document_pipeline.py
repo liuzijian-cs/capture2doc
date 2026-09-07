@@ -461,6 +461,7 @@ def test_local_model_phase_cleans_up_after_request_exception(
         summary=lambda: {},
     )
     monkeypatch.setattr(module, "VllmRuntime", Runtime)
+    monkeypatch.setattr(module, "inference_backend", lambda: "cuda-vllm")
     monkeypatch.setattr(module, "GpuMemorySampler", lambda: sampler)
     monkeypatch.setattr(
         module, "ensure_group_exited", lambda pid: events.append(f"group:{pid}")

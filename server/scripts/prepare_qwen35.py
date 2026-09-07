@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Download the official Qwen3.5-9B snapshot with ModelScope."""
+"""Download the official Qwen3.5-4B or 9B snapshot with ModelScope."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from capture2doc.config import QWEN35_MODEL_REVISION, Qwen35Settings
+from capture2doc.config import QWEN35_MODEL_REVISION, qwen_settings
 from capture2doc.inference.model_store import prepare_model
 from capture2doc.inference.qwen35_tokens import sha256_if_file
 
@@ -20,13 +20,14 @@ REQUIRED_CONFIG_FILES = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", help="ModelScope cache directory")
+    parser.add_argument("--qwen-model", choices=("4b", "9b"), default="9b")
     parser.add_argument("--revision", default=QWEN35_MODEL_REVISION, help="Model revision")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    settings = Qwen35Settings.from_sources(args.cache_dir, revision=args.revision)
+    settings = qwen_settings(args.cache_dir, model=args.qwen_model, revision=args.revision)
     print(f"ModelScope cache: {settings.cache_dir}")
     print(f"Preparing model: {settings.model_id}")
     print(f"Revision: {settings.revision}")

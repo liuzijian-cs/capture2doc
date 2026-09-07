@@ -16,12 +16,20 @@ class ModelNotPreparedError(RuntimeError):
     """Raised when an offline worker cannot find a prepared model snapshot."""
 
 
+def _prepare_hint(settings: VllmWorkerSettings) -> str:
+    command = f"scripts/{settings.prepare_script_name}"
+    if settings.model_id in {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-9B"}:
+        command += f" --qwen-model {settings.model_id.rsplit('-', 1)[-1].lower()}"
+    return command
+
+
 def _snapshot_download() -> SnapshotDownload:
     try:
         from modelscope import snapshot_download
     except ImportError as exc:
         raise RuntimeError(
-            "ModelScope is not installed. On NVIDIA/WSL run `uv sync --extra cuda`."
+            "ModelScope is not installed. Run `uv sync --extra cuda` on NVIDIA/WSL "
+            "or `uv sync --extra apple` on Apple Silicon."
         ) from exc
     return snapshot_download
 
@@ -54,7 +62,7 @@ def resolve_prepared_model(
     if not settings.cache_dir.is_dir():
         raise ModelNotPreparedError(
             f"ModelScope cache does not exist: {settings.cache_dir}. "
-            f"Run scripts/{settings.prepare_script_name} first."
+            f"Run {_prepare_hint(settings)} first."
         )
 
     os.environ[MODELSCOPE_CACHE_ENV] = str(settings.cache_dir)
@@ -69,7 +77,7 @@ def resolve_prepared_model(
     except Exception as exc:
         raise ModelNotPreparedError(
             f"No local snapshot for {settings.model_id}@{settings.revision} in "
-            f"{settings.cache_dir}. Run scripts/{settings.prepare_script_name} first."
+            f"{settings.cache_dir}. Run {_prepare_hint(settings)} first."
         ) from exc
 
     path = Path(snapshot).expanduser().resolve()

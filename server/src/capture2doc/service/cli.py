@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from capture2doc.pipeline.store import exclusive_lock
@@ -18,6 +19,8 @@ def main(argv=None):
     for name in ('api','worker','token','storage'):
         command=commands.add_parser(name)
         command.add_argument('--config',type=Path,default=argparse.SUPPRESS)
+        if name == 'worker':
+            command.add_argument('--qwen-model', choices=('4b', '9b'))
         if name in ('token','storage'):
             actions=command.add_subparsers(dest='action',required=True)
             for action in (('create','list','revoke') if name=='token' else ('inspect','prune')):
@@ -32,6 +35,8 @@ def main(argv=None):
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(name)s %(message)s')
     settings=Settings.load(args.config)
+    if getattr(args, 'qwen_model', None):
+        settings=replace(settings,qwen_model=args.qwen_model)
     try:
         if args.command=='api':
             import uvicorn

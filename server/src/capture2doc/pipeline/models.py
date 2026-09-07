@@ -12,7 +12,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Iterator
 
-from capture2doc.config import PaddleOcrVlSettings, Qwen35Settings
+from capture2doc.config import PaddleOcrVlSettings, inference_backend, qwen_settings
 from capture2doc.inference.gpu_memory import GpuMemorySampler
 from capture2doc.inference.model_store import resolve_prepared_model
 from capture2doc.inference.paddleocr_vl import recognize_image
@@ -22,6 +22,7 @@ from capture2doc.inference.qwen35_tokens import (
     load_qwen35_processor,
 )
 from capture2doc.inference.runtime import VllmRuntime
+from capture2doc.inference.mlx_runtime import MlxRuntime
 
 from .store import atomic_write, digest, now, write_json
 
@@ -108,6 +109,19 @@ def verify_previous_cleanup(directory: Path) -> None:
         metrics = json.loads(path.read_text(encoding="utf-8"))
         if metrics.get("cleanup_verified") or metrics.get("recovery_verified_at"):
             continue
+        if metrics.get("backend") == "apple-mlx":
+            pid = metrics.get("worker_pid")
+            if pid is None:
+                raise RuntimeError(f"Missing MLX process identity; inspect {path}")
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise RuntimeError(f"Previous MLX process {pid} still exists; inspect {path}")
+            metrics["recovery_verified_at"] = now()
+            write_json(path, metrics)
+            continue
         pgid = metrics.get("pgid")
         if pgid is not None:
             try:
@@ -126,10 +140,13 @@ def verify_previous_cleanup(directory: Path) -> None:
 
 
 class LocalModels:
-    def __init__(self, *, cache_dir: str | None = None, host: str = "127.0.0.1"):
+    def __init__(self, *, cache_dir: str | None = None, host: str = "127.0.0.1",
+                 qwen_model: str = "9b"):
+        self.backend = inference_backend()
+        self.active_mlx: MlxRuntime | None = None
         self.paddle = replace(PaddleOcrVlSettings.from_sources(cache_dir), host=host)
         self.qwen = replace(
-            Qwen35Settings.from_sources(cache_dir),
+            qwen_settings(cache_dir, model=qwen_model, backend=self.backend),
             host=host,
             kv_cache_memory_bytes=640 * 1024**2,
         )
@@ -146,6 +163,8 @@ class LocalModels:
                 "snapshot_path": str(path),
                 "snapshot_metadata_sha256": snapshot_fingerprint(path),
             }
+            if self.backend == "apple-mlx":
+                info[name]["backend"] = self.backend
         self.processor = load_qwen35_processor(self.paths["qwen"])
         return info
 
@@ -167,6 +186,12 @@ class LocalModels:
 
     @contextmanager
     def phase(self, name: str, directory: Path) -> Iterator[None]:
+        if name not in {"paddle", "qwen"}:
+            raise ValueError(f"Unknown model phase: {name}")
+        if self.backend == "apple-mlx":
+            with self._mlx_phase(name, directory):
+                yield
+            return
         settings = self.paddle if name == "paddle" else self.qwen
         runtime = VllmRuntime(
             settings, self.paths[name], directory / f"{name}.vllm.log"
@@ -214,6 +239,47 @@ class LocalModels:
                 metrics["gpu_memory"] = sampler.summary()
                 write_json(directory / f"{name}.metrics.json", metrics)
 
+    @contextmanager
+    def _mlx_phase(self, name: str, directory: Path) -> Iterator[None]:
+        if self.active_mlx is not None:
+            raise RuntimeError("A model phase is already active")
+        settings = self.paddle if name == "paddle" else self.qwen
+        runtime = MlxRuntime(settings, self.paths[name], directory / f"{name}.mlx.log")
+        metrics = {"started_at": now(), "model": name, "backend": self.backend,
+                   "cleanup_verified": False}
+        self.active_mlx = runtime
+        try:
+            started = time.monotonic()
+            try:
+                runtime.start()
+                metrics["worker_pid"] = runtime.process.pid
+                write_json(directory / f"{name}.metrics.json", metrics)
+                runtime.wait_ready()
+                metrics["load_seconds"] = time.monotonic() - started
+                yield
+            finally:
+                stopped = time.monotonic()
+                runtime.stop()
+                # Process exit releases its entire Metal context, including KV caches.
+                metrics["cleanup_verified"] = True
+                metrics["cleanup_method"] = "process_exit"
+                metrics["unload_seconds"] = time.monotonic() - stopped
+        except BaseException as exc:
+            metrics["error"] = str(exc) or type(exc).__name__
+            raise
+        finally:
+            if metrics["cleanup_verified"]:
+                self.active_mlx = None
+            metrics["ended_at"] = now()
+            metrics["mlx_memory"] = runtime.metrics
+            write_json(directory / f"{name}.metrics.json", metrics)
+
+    def _mlx_request(self, name: str, path: Path, **kwargs: Any) -> dict[str, Any]:
+        settings = self.paddle if name == "paddle" else self.qwen
+        if self.active_mlx is None or self.active_mlx.settings != settings:
+            raise RuntimeError(f"The {name} MLX phase is not active")
+        return self.active_mlx.generate({"image": str(path.resolve()), **kwargs})
+
     def _client(self, name: str) -> Any:
         from openai import OpenAI
 
@@ -227,6 +293,9 @@ class LocalModels:
         )
 
     def ocr(self, path: Path) -> Any:
+        if self.backend == "apple-mlx":
+            from capture2doc.inference.paddleocr_vl import OcrResult
+            return OcrResult(**self._mlx_request("paddle", path, max_tokens=self.paddle.max_output_tokens))
         with self._client("paddle") as client:
             return recognize_image(path, self.paddle, client=client, allow_empty=True)
 
@@ -253,6 +322,14 @@ class LocalModels:
         *,
         response_schema: dict[str, Any] | None = None,
     ) -> Any:
+        if self.backend == "apple-mlx":
+            from capture2doc.inference.qwen35 import Qwen35Result, validate_prompt_budget
+            validate_prompt_budget(inspection.prompt_tokens, self.qwen, max_tokens=output)
+            return Qwen35Result(reasoning=None, **self._mlx_request(
+                "qwen", path, rendered_prompt=inspection.rendered_prompt,
+                prompt_tokens=inspection.prompt_tokens, max_tokens=output,
+                response_schema=response_schema,
+            ))
         with self._client("qwen") as client:
             return analyze_image(
                 path,

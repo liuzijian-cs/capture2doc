@@ -10,7 +10,7 @@ from typing import Any
 
 class InferenceBackend(StrEnum):
     CUDA_VLLM = "cuda-vllm"
-    APPLE_MLX = "apple-mlx"  # Reserved for the future macOS implementation.
+    APPLE_MLX = "apple-mlx"
 
 
 class CudaUnavailableError(RuntimeError):
@@ -64,8 +64,8 @@ def detect_cuda(torch_module: Any | None = None, *, device_index: int = 0) -> Cu
     cuda = torch.cuda
     if not cuda.is_available() or cuda.device_count() <= device_index:
         raise CudaUnavailableError(
-            "CUDA is unavailable. PaddleOCR-VL currently requires an NVIDIA CUDA GPU; "
-            "the MLX backend is not implemented yet."
+            "CUDA is unavailable. This diagnostic requires an NVIDIA CUDA GPU; "
+            "on Apple Silicon use run_document.py with --extra apple."
         )
 
     properties = cuda.get_device_properties(device_index)

@@ -1,4 +1,9 @@
-# Capture2Doc Server
+# Capture2Doc
+
+Capture2Doc 是一个将连续拍摄的文档照片自动整理为可编辑文档的工具。
+
+用户按顺序拍摄同一份文档后，系统自动识别图片内容，拼接并合并重复内容，生成排版统一的连续文档。尽最大能力还原源文档的标题、段落、列表、表格、代码、公式及粗体、颜色、高亮等格式，可预览并复制到飞书、思源，或导出为 Markdown、纯文本。
+
 
 Capture2Doc 的本地推理服务。当前提供 NVIDIA/WSL 上可独立验证的
 PaddleOCR-VL-1.6 BF16 Worker 和 Qwen3.5-9B FP8 Worker。ModelScope 负责准备模型，
@@ -15,6 +20,52 @@ vLLM 只加载本地快照。本地 CLI V2 将 Paddle OCR、Qwen 多 block 草�
 OpenResty 和断线续传见 [服务协议与运维](../docs/server_service.md)、[OpenAPI](../docs/server_openapi.json)
 及 [验收记录](../docs/server_service_validation.md)。公网 GET 返回完整 C2D-XML JSON；SSE 提供可更新的块预览，
 不改变模型整图候选响应或每图正式提交的边界。
+
+## Mac 本地调试（Apple Silicon）
+
+Mac 自动选择 MLX-VLM；Linux/NVIDIA 保持 vLLM。通过 `--qwen-model 4b` 选择
+Qwen3.5-4B，默认仍为 `9b`。4B 使用官方未量化权重，沿用 BF16；Mac 上的
+9B 同样使用 BF16、不量化，NVIDIA 的 9B 继续使用原 BF16 加载加 FP8 在线量化配置。
+PaddleOCR-VL-1.6 在 Mac 使用 BF16。16 GB 统一内存机器应选择 4B。
+
+在 `server/` 目录运行：
+
+```bash
+uv sync --locked --extra apple --extra service
+uv run --locked --extra apple --extra service python scripts/prepare_paddleocr_vl.py
+uv run --locked --extra apple --extra service python scripts/prepare_qwen35.py --qwen-model 4b
+uv run --locked --extra apple --extra service python scripts/run_document.py \
+  --qwen-model 4b --manifest /absolute/path/input.json \
+  --output-dir .cache/documents/mac-debug
+```
+
+使用 HTTP 服务时，在私有 TOML 的 `[service]` 下设置 `qwen_model = "4b"`，然后分别启动
+`uv run --locked --extra apple --extra service capture2doc api --config <TOML>` 和
+`uv run --locked --extra apple --extra service capture2doc worker --config <TOML>`。
+也可用 `C2D_QWEN_MODEL=4b` 覆盖 TOML，或为 `worker` 增加 `--qwen-model 4b`
+（命令行优先于环境变量和 TOML）。模型准备与运行必须选择相同型号和缓存目录。
+
+首次准备需要联网，默认缓存为 `~/models/modelscope`；运行阶段只使用本地快照。
+原始缓存保留官方精度，不另存转换后的权重。MLX 保留模型实现要求的少量高精度参数，
+例如 Qwen 的 `A_log`；主权重使用 BF16，不启用权重或 KV 量化。
+
+调度沿用 **Paddle OCR → 退出 Paddle 子进程 → Qwen → 退出 Qwen 子进程**。
+MLX 模型权重和 Metal 状态只存在于独立子进程，退出确认失败会阻止加载下一模型。
+`*.mlx.log` 和 `*.metrics.json` 记录加载、卸载、实际权重类型以及 MLX 进程内存峰值；
+这不是整机统一内存占用。Mac 不使用 `nvidia-smi` 或 NVIDIA 的固定 KV cache 配额。
+Qwen 保持 16K 上下文、8K 最大输出、关闭 thinking 和 JSON Schema 输出约束，
+预填充按 256 token 分块。实际输入 token 数必须与预检一致，否则停止该请求。
+
+Mac 调试使用新的输出目录／独立服务数据目录；模型、精度或后端变化时，现有检查点的
+配置一致性校验仍会生效。现有 `smoke_*` 和 `stress_*` 脚本仍是 NVIDIA 诊断入口；
+Mac 可用上述完整文档 CLI，或 `inspect_qwen35_tokens.py --qwen-model 4b --image <图片>`
+只检查输入 token。
+
+2026-09-07 在 M4／16 GB 上完成一张 800×400、三行英文测试图的完整 CLI 验证：
+OCR 和导出文本与输入一致，生成 3 块、0 次修复、无需人工复核；两个模型均确认退出。
+Qwen 实际主权重为 BF16，另保留 3072 字节 FP32 参数。MLX 进程峰值：Paddle 2.34 GiB、
+Qwen 9.27 GiB；Qwen 加载约 20.55 秒、生成约 61.10 秒（3302 输入 token）。
+445 项自动化回归通过。该结果仅覆盖这张简单测试图，未验证长上下文、多图质量或整机内存上限。
 
 ## 文档转换 CLI
 

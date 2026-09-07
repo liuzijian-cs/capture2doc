@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Sequence
 
-from capture2doc.config import QWEN35_MODEL_REVISION, Qwen35Settings
+from capture2doc.config import QWEN35_MODEL_REVISION, qwen_settings
 from capture2doc.inference.model_store import resolve_prepared_model
 from capture2doc.inference.qwen35 import DEFAULT_DOCUMENT_PROMPT, validate_prompt_budget
 from capture2doc.inference.qwen35_tokens import inspect_qwen35_tokens
@@ -20,6 +20,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image", required=True, help="Absolute path to a PNG/JPEG image")
     parser.add_argument("--prompt", default=DEFAULT_DOCUMENT_PROMPT, help="Text after the image")
     parser.add_argument("--cache-dir", help="ModelScope cache directory")
+    parser.add_argument("--qwen-model", choices=("4b", "9b"), default="9b")
     parser.add_argument("--revision", default=QWEN35_MODEL_REVISION, help="Model revision")
     parser.add_argument("--output-dir", help="Directory for token summary and template")
     parser.add_argument("--max-pixels", type=int, help="Maximum image pixels")
@@ -39,7 +40,7 @@ def main() -> int:
     from dataclasses import replace
 
     args = parse_args()
-    settings = Qwen35Settings.from_sources(args.cache_dir, revision=args.revision)
+    settings = qwen_settings(args.cache_dir, model=args.qwen_model, revision=args.revision)
     overrides = {
         "max_pixels": args.max_pixels,
         "max_model_len": args.max_model_len,

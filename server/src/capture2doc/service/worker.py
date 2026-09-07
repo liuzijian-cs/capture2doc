@@ -23,7 +23,8 @@ class Worker:
     def __init__(self, settings: Settings, models=None):
         self.settings=settings
         self.repo=Repository(settings)
-        self.models=models or LocalModels(cache_dir=str(settings.model_cache),host=settings.model_host)
+        self.models=models or LocalModels(cache_dir=str(settings.model_cache),host=settings.model_host,
+                                         qwen_model=settings.qwen_model)
         self.configuration=None
 
     def prepare(self):

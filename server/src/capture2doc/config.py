@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ QWEN35_MODEL_ID = "Qwen/Qwen3.5-9B"
 QWEN35_MODEL_REVISION = "master"
 QWEN35_SERVED_MODEL_NAME = "Qwen3.5-9B"
 MODELSCOPE_CACHE_ENV = "MODELSCOPE_CACHE"
+
 
 DEFAULT_MAX_PIXELS = 1_003_520
 DEFAULT_MAX_OUTPUT_TOKENS = 4_096
@@ -187,3 +189,29 @@ class Qwen35Settings(VllmWorkerSettings):
     enable_thinking_by_default: bool | None = False
     enable_chunked_prefill: bool = True
     prepare_script_name: str = "prepare_qwen35.py"
+
+def inference_backend() -> str:
+    """Keep backend selection automatic; model size is the user-facing choice."""
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return "apple-mlx"
+    return "cuda-vllm"
+
+
+def qwen_settings(
+    cache_dir: str | Path | None = None,
+    *,
+    model: str = "9b",
+    revision: str | None = None,
+    backend: str | None = None,
+) -> Qwen35Settings:
+    """Select model identity and precision without changing existing 9B CUDA defaults."""
+    from dataclasses import replace
+
+    if model not in {"4b", "9b"}:
+        raise ValueError("qwen_model must be '4b' or '9b'")
+    settings = Qwen35Settings.from_sources(cache_dir, revision=revision)
+    settings = replace(settings, model_id=f"Qwen/Qwen3.5-{model.upper()}",
+                       served_model_name=f"Qwen3.5-{model.upper()}")
+    if model == "4b" or (backend or inference_backend()) == "apple-mlx":
+        settings = replace(settings, dtype="bfloat16", quantization=None)
+    return settings

@@ -19,6 +19,7 @@ from capture2doc.pipeline.store import DocumentStore, exclusive_lock
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--qwen-model", choices=("4b", "9b"), default="9b")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--manifest", type=Path, help="JSON document/images/ordered_image_ids"
@@ -77,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 store.create(args.manifest)
             with exclusive_lock(args.gpu_lock):
-                models = LocalModels(cache_dir=args.cache_dir, host=args.host)
+                models = LocalModels(cache_dir=args.cache_dir, host=args.host, qwen_model=args.qwen_model)
 
                 def progress(message: str) -> None:
                     print(message, file=sys.stderr, flush=True)

@@ -14,6 +14,7 @@ class Settings:
     trusted_proxy: str = "127.0.0.1"
     model_host: str = "127.0.0.1"
     model_cache: Path = Path.home() / "models/modelscope"
+    qwen_model: str = "9b"
     gpu_lock: Path = Path("/tmp/capture2doc-gpu.lock")
     max_upload_bytes: int = 10 * 1024**2
     max_image_edge: int = 1280
@@ -29,6 +30,8 @@ class Settings:
     max_streams_per_device_document: int = 2
 
     def __post_init__(self):
+        if self.qwen_model not in {"4b", "9b"}:
+            raise ValueError("qwen_model must be '4b' or '9b'")
         for name in ("data_root", "model_cache", "gpu_lock"):
             object.__setattr__(self, name, Path(getattr(self, name)).expanduser().resolve())
         for item in fields(self):
