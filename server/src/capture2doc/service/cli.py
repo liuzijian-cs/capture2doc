@@ -10,6 +10,7 @@ from pathlib import Path
 from capture2doc.pipeline.store import exclusive_lock
 from .repository import Repository
 from .settings import Settings
+from capture2doc.config import QWEN_QUANTIZATIONS
 
 
 def main(argv=None):
@@ -21,6 +22,7 @@ def main(argv=None):
         command.add_argument('--config',type=Path,default=argparse.SUPPRESS)
         if name == 'worker':
             command.add_argument('--qwen-model', choices=('4b', '9b'))
+            command.add_argument('--qwen-quantization', choices=QWEN_QUANTIZATIONS)
         if name in ('token','storage'):
             actions=command.add_subparsers(dest='action',required=True)
             for action in (('create','list','revoke') if name=='token' else ('inspect','prune')):
@@ -37,6 +39,8 @@ def main(argv=None):
     settings=Settings.load(args.config)
     if getattr(args, 'qwen_model', None):
         settings=replace(settings,qwen_model=args.qwen_model)
+    if getattr(args, 'qwen_quantization', None):
+        settings=replace(settings,qwen_quantization=args.qwen_quantization)
     try:
         if args.command=='api':
             import uvicorn

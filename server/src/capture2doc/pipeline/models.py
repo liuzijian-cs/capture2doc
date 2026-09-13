@@ -141,12 +141,13 @@ def verify_previous_cleanup(directory: Path) -> None:
 
 class LocalModels:
     def __init__(self, *, cache_dir: str | None = None, host: str = "127.0.0.1",
-                 qwen_model: str = "9b"):
+                 qwen_model: str = "9b", qwen_quantization: str = "auto"):
         self.backend = inference_backend()
         self.active_mlx: MlxRuntime | None = None
         self.paddle = replace(PaddleOcrVlSettings.from_sources(cache_dir), host=host)
         self.qwen = replace(
-            qwen_settings(cache_dir, model=qwen_model, backend=self.backend),
+            qwen_settings(cache_dir, model=qwen_model, backend=self.backend,
+                          quantization=qwen_quantization),
             host=host,
             kv_cache_memory_bytes=640 * 1024**2,
         )

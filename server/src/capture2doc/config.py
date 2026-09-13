@@ -197,12 +197,16 @@ def inference_backend() -> str:
     return "cuda-vllm"
 
 
+QWEN_QUANTIZATIONS = ("auto", "none", "mlx8bit", "mxfp8", "fp8_per_channel")
+
+
 def qwen_settings(
     cache_dir: str | Path | None = None,
     *,
     model: str = "9b",
     revision: str | None = None,
     backend: str | None = None,
+    quantization: str = "auto",
 ) -> Qwen35Settings:
     """Select model identity and precision without changing existing 9B CUDA defaults."""
     from dataclasses import replace
@@ -212,6 +216,15 @@ def qwen_settings(
     settings = Qwen35Settings.from_sources(cache_dir, revision=revision)
     settings = replace(settings, model_id=f"Qwen/Qwen3.5-{model.upper()}",
                        served_model_name=f"Qwen3.5-{model.upper()}")
-    if model == "4b" or (backend or inference_backend()) == "apple-mlx":
+    backend = backend or inference_backend()
+    if model == "4b" or backend == "apple-mlx":
         settings = replace(settings, dtype="bfloat16", quantization=None)
+    if quantization not in QWEN_QUANTIZATIONS:
+        raise ValueError(f"Unknown Qwen quantization: {quantization}")
+    if backend == "apple-mlx" and quantization == "fp8_per_channel":
+        raise ValueError("fp8_per_channel is a vLLM mode; on Mac use mxfp8 or mlx8bit")
+    if backend != "apple-mlx" and quantization in {"mlx8bit", "mxfp8"}:
+        raise ValueError("mlx8bit/mxfp8 require the Apple MLX backend")
+    if quantization != "auto":
+        settings = replace(settings, quantization=None if quantization == "none" else quantization)
     return settings

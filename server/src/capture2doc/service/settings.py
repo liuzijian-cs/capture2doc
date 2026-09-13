@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
+from capture2doc.config import QWEN_QUANTIZATIONS
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class Settings:
     model_host: str = "127.0.0.1"
     model_cache: Path = Path.home() / "models/modelscope"
     qwen_model: str = "9b"
+    qwen_quantization: str = "auto"
     gpu_lock: Path = Path("/tmp/capture2doc-gpu.lock")
     max_upload_bytes: int = 10 * 1024**2
     max_image_edge: int = 1280
@@ -30,6 +32,8 @@ class Settings:
     max_streams_per_device_document: int = 2
 
     def __post_init__(self):
+        if self.qwen_quantization not in QWEN_QUANTIZATIONS:
+            raise ValueError("Invalid qwen_quantization")
         if self.qwen_model not in {"4b", "9b"}:
             raise ValueError("qwen_model must be '4b' or '9b'")
         for name in ("data_root", "model_cache", "gpu_lock"):

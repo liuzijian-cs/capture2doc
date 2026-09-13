@@ -24,7 +24,8 @@ class Worker:
         self.settings=settings
         self.repo=Repository(settings)
         self.models=models or LocalModels(cache_dir=str(settings.model_cache),host=settings.model_host,
-                                         qwen_model=settings.qwen_model)
+                                         qwen_model=settings.qwen_model,
+                                         qwen_quantization=settings.qwen_quantization)
         self.configuration=None
 
     def prepare(self):

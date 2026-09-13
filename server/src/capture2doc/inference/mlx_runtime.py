@@ -126,6 +126,31 @@ def _serve(connection, settings, model_path, log_path) -> None:
             connection.close()
 
 
+def quantization_profile(name):
+    if name is None:
+        return None
+    if name == "mlx8bit":
+        return {"mode": "affine", "bits": 8, "group_size": 64}
+    if name == "mxfp8":
+        return {"mode": "mxfp8", "bits": 8, "group_size": 32}
+    raise ValueError(f"Unsupported MLX quantization {name!r}; use mlx8bit or mxfp8, not vLLM fp8_per_channel")
+
+
+def quantize_weights(model, config, profile):
+    """Use MLX-VLM conversion rules, preserving vision and model-specific exclusions."""
+    from mlx_vlm.quant_utils import quantize_model
+    from mlx_vlm.utils import skip_multimodal_module
+
+    predicate = getattr(model, "quant_predicate", None)
+
+    def select(path, module):
+        if skip_multimodal_module(path):
+            return False
+        return predicate(path, module) if predicate is not None else True
+
+    return quantize_model(model, config, quant_predicate=select, **profile)
+
+
 def _load(settings, model_path):
     import gc
     import json
@@ -135,20 +160,24 @@ def _load(settings, model_path):
     from mlx_vlm import load
 
     config = json.loads((model_path / "config.json").read_text())
-    if config.get("quantization") or config.get("quantization_config"):
-        raise ValueError("MLX debugging requires original, unquantized model weights")
-    if settings.quantization is not None:
-        raise ValueError("MLX debugging does not enable quantization")
+    profile = quantization_profile(settings.quantization)
+    stored = config.get("quantization") or config.get("quantization_config")
+    if stored and (profile is None or any(stored.get(k, "affine" if k == "mode" else None) != v
+                                        for k, v in profile.items())):
+        raise ValueError("Checkpoint quantization does not match the selected MLX profile")
     mx.set_cache_limit(256 * 1024**2)
     model, processor = load(str(model_path), lazy=True,
                             trust_remote_code=settings.trust_remote_code)
     dtype = getattr(mx, settings.dtype)
     predicate = getattr(model, "cast_predicate", lambda _: True)
-    model.update(tree_map_with_path(
-        lambda key, value: value.astype(dtype)
-        if predicate(key) and mx.issubdtype(value.dtype, mx.floating) else value,
-        model.parameters(),
-    ))
+    if not stored:
+        model.update(tree_map_with_path(
+            lambda key, value: value.astype(dtype)
+            if predicate(key) and mx.issubdtype(value.dtype, mx.floating) else value,
+            model.parameters(),
+        ))
+        if profile is not None:
+            model, config = quantize_weights(model, config, profile)
     weights = tree_flatten(model.parameters())
     weight_bytes = sum(value.nbytes for _, value in weights)
     recommended = mx.device_info().get("max_recommended_working_set_size")
@@ -165,7 +194,9 @@ def _load(settings, model_path):
     mx.clear_cache()
     configure_image_processor(processor, settings, model_path)
     return model, processor, {
-        "dtype": settings.dtype, "quantization": None,
+        "dtype": settings.dtype, "quantization": settings.quantization,
+        "quantization_config": config.get("quantization") or stored,
+        "quantization_source": "checkpoint" if stored else "on_load" if profile else None,
         "weight_bytes": weight_bytes, "weight_bytes_by_dtype": dtypes,
         "active_memory_bytes": mx.get_active_memory(),
         "peak_memory_bytes": mx.get_peak_memory(),
